@@ -3,12 +3,54 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
+import static
+import gzip
+import io
 equity = 'DLPH'
 
 #####generate features
 dataprocess.computeFeatureForEquity(equity,dataprocess.parameter,pd.datetime(2017,2,3),pd.datetime(2017,11,29),local=False,output_local=True)
 #####generate features
+
+#####tmp patch to add new feature
+for equity in static.equities_done:
+    dataprocess.computeFeatureForEquity(equity, dataprocess.parameter, pd.datetime(2017, 2, 3),
+                                        pd.datetime(2017, 11, 29), local=False, output_local=True,computeNewFeature=True)
+
+
+#for equity in static.equities_done[1:]:
+featurename='litvolume'
+for equity in static.equities_done[14:]:
+    localfolder='Data//newfeatures/' + equity + '/'
+    #remotefolder='s3://equity-flash/features/'+equity+'/'
+    remotefolder = 's3://equity-flash/features/'
+    print(equity)
+    df = pd.read_csv(remotefolder + equity+'_all.csv.gz',compression='gzip',index_col=0)
+    if 'Unnamed: 0.1' in df.columns:
+        df.set_index('Unnamed: 0.1', inplace=True)
+    df.index = pd.to_datetime(df.index)
+    if len(df)<1: continue
+    alldata=pd.DataFrame()
+    for file in os.listdir(localfolder):
+        if file.startswith('.'): continue
+        spreaddata= pd.DataFrame.from_csv(localfolder+file)
+        if len(spreaddata)>0:
+            alldata=pd.concat([alldata,spreaddata])
+
+            #bytes_to_write = df.to_csv(None).encode()
+            #print('write: '+ remotefolder+file)
+            #with dataprocess.fs.open(remotefolder+file, 'wb') as f:
+            #    f.write(df.to_csv(None).encode())
+        #alldata=pd.concat([alldata,df])
+    csv_buffer = io.StringIO()
+    df.merge(alldata,left_index=True,right_index=True,how='left').to_csv(csv_buffer)
+    csv_buffer.seek(0)
+    gz_buffer=io.BytesIO()
+    with gzip.GzipFile(mode='w', fileobj=gz_buffer) as gz_file:
+        gz_file.write(bytes(csv_buffer.getvalue(), 'utf-8'))
+    s3_object = dataprocess.s3_resource.Object('equity-flash', 'features/' + equity + '_all.csv.gz')
+    s3_object.put(Body=gz_buffer.getvalue())
+#####tmp patch
 
 ####temp
 equity='ZTS'
@@ -42,6 +84,10 @@ df['maxchg_absQ']=pd.qcut(df['maxchg_abs'],10,labels=range(10))
 df['eodchg_ratioQ']=df.apply(lambda r: 1 if r['eodchange']*r['maxchg']<0.5*r['maxchg']*r['maxchg'] else 0, axis=1)
 
 df.boxplot(column=['alltradeimb_auto','trfimb_auto','trfcntimb_auto','totimb_auto'], by=['maxchg_absQ','eodchg_ratioQ'],layout=(4,1))
+
+
+
+
 
 
 import seaborn as sns

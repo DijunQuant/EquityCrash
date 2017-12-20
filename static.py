@@ -35,5 +35,5 @@ equitties_train=['AAL', 'AAP', 'AAPL', 'ABC', 'ABT', 'ACN', 'ADI', 'ADM', 'ADP',
                  'UAA', 'UAL', 'UHS', 'ULTA', 'UNH', 'UNP', 'UPS', 'URI', 'UTX', 'V', 'VAR', 'VIAB', 'VLO', 'VMC',
                  'VRSK', 'VRSN', 'VRTX', 'VZ', 'WAT', 'WBA', 'WEC', 'WFC', 'WHR', 'WM', 'WMB', 'WMT', 'WU', 'WY', 'WYN',
                  'XEC', 'XEL', 'XL', 'XOM', 'XRAY', 'XRX', 'YUM', 'ZBH', 'ZION']
-equities_done=['AAL','AAP','AAPL','ABC','ABT','ACN','ADI','ADP','CMA','DLPH','KORS','WU','ZTS']
+equities_done=['AAL','AAP','AAPL','ABC','ABT','ACN','ADI','ADM','ADP','ADSK','AEE','AEP','AET','AFL','AGN','CMA','DLPH','KORS','WU','ZTS']
 

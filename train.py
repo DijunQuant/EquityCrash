@@ -20,10 +20,9 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
-
+pd.set_option('display.float_format', lambda x: '%.3f' % x)
 
 df=pd.DataFrame()
-
 equitylist=[x for x in static.equities_done if (x in static.equitties_train)]
 for equity in equitylist:
     thisDF=dataprocess.loadFeatureData(equity,local=False)
@@ -31,78 +30,67 @@ for equity in equitylist:
     df=pd.concat([df,thisDF])
 df.dropna(inplace=True)
 
+df=pd.DataFrame()
+equitylist=[x for x in static.equities_done if (x in static.equitties_train)]
+for equity in equitylist:
+    thisDF=dataprocess.loadFeatureDataBulk(equity)
+    thisDF['stock']=equity
+    df=pd.concat([df,thisDF])
+df.dropna(inplace=True)
+
+stock='AAPL'
+feature='litvolume'
+startdate=pd.datetime(2017,2,10)
+enddate=pd.datetime(2017,2,20)
+tmp=pd.DataFrame()
+for date in [x for x in df.date.unique() if ((pd.to_datetime(x)<enddate) and (pd.to_datetime(x)>=startdate))]:
+    tmp[date]=df[(df['stock']==stock) & (df['date']==date)][feature].values
+tmp.plot()
+
+
 ######crash method 1
 crash_thrshld=0.02
 reverseratio=0.5
 df['target']=df.apply(lambda r: 1 if (r['maxchg_abs']>crash_thrshld and r['eodchange']*r['maxchg']<reverseratio*r['maxchg']*r['maxchg']) else 0, axis=1)
 
 ####crash method 2
-crash_thrshld=0.02
+crash_thrshld=0.025
 #crash_thrshld=0.015
 reverseratio=0.5
-df['target']=df.apply(lambda r: 1 if (r['maxrange']>crash_thrshld and np.abs(r['eodchange'])<reverseratio*r['maxrange']) else 0, axis=1)
-
+df['target']=df.apply(lambda r: 1 if (r['maxrange']>crash_thrshld and r['eodchange']*r['maxchg']<reverseratio*r['maxchg']*r['maxchg']) else 0, axis=1)
 ######summary
+df['timebucket']=df.index.hour
+print(df.groupby('timebucket')['target'].sum())
+
+
 targetsummary=df.groupby(['stock','date'])['target'].max()
 print(targetsummary.value_counts())
-for equity in equitylist:
+for equity in df['stock'].unique():
     x=targetsummary[equity].value_counts()
     y=df[df['stock'] == equity]['target'].value_counts()
     if 1 in x.index:
         print(equity+': by day %.4f, by minute %.4f'%(x[1]/x.sum(),(y[1] if 1 in y.index else 0)/y.sum()))
-        print(targetsummary[equity][targetsummary[equity] == 1].index)
+        #print(targetsummary[equity][targetsummary[equity] == 1].index)
     else:
         print(equity+': by day 0, by minute %.4f'% ((y[1] if 1 in y.index else 0)/y.sum()))
-
 
 
 ######train model
 # load data
 
 
-featurecols=['alltradeimb_auto','trfimb_auto','trfcntimb_auto','totimb_auto','mindepth']
+featurecols=['alltradeimb_auto','trfimb_auto','trfcntimb_auto','totimb_auto','mindepth','spread','litvolume']
 
 # split data into train and test sets
 
 print(pd.DataFrame({'largemv':df[df['maxchg_abs']>crash_thrshld].groupby('date')['maxchg_abs'].count(),\
                     'crash':df[df['target']==1].groupby('date')['target'].count()}).fillna(0))
-def modelselect(df,classifiers,predsratio,dsratio,kfold,seed,weightadj=True):
-    ####classifiers need resample
-    result_dict = dict()
-    kfsplits = modeltrain.stratifiedDF(kfold, seed, df,dsample=predsratio)
-    for (name, model) in classifiers:
-        if name in result_dict.keys(): continue
-        accuracy_result, precision_result, cm, testDF = modeltrain.train_model(model, df, featurecols, kfsplits, dsratio,weightadj=weightadj)
-        byday = testDF.groupby('target')['predict'].value_counts()
-        score_0 = (byday[(0, 0)] if (0, 0) in byday.index else 0) / (byday[0].sum())
-        score_1 = (byday[(1, 1)] if (1, 1) in byday.index else 0) / (byday[1].sum())
-        result_dict[name] = (np.mean(precision_result), np.mean(accuracy_result), score_0, score_1)
-        print(name+':%.3f, %.3f, %.3f, %.3f'% (np.mean(precision_result),np.mean(accuracy_result),score_0,score_1))
-    summaryDF = pd.DataFrame.from_dict(result_dict, orient='index')
-    summaryDF.columns = ['precision', 'accuracy', 'score_0', 'score_1']
-    summaryDF.sort_values(['score_1', 'score_0'], ascending=False, inplace=True)
-    return summaryDF
 
-classifiers = [
-    ('XGB',XGBClassifier(scale_pos_weight=10)),
-    ('XGB_cus',XGBClassifier(scale_pos_weight=10,max_delta_step=1,max_depth=3)),
-    ('XGB_cus1',XGBClassifier(scale_pos_weight=10,max_delta_step=1,max_depth=3,reg_alpha=1,gamma=1)),
-    #GaussianProcessClassifier(1.0 * RBF(1.0), warm_start=True),
-    ('DT',DecisionTreeClassifier(max_depth=5,class_weight={0:0,1:10})),
-    #('RF',RandomForestClassifier(max_depth=5, n_estimators=10, max_features=1,class_weight='balanced'))
-    #MLPClassifier(alpha=1),
-    #AdaBoostClassifier(),
-    #GaussianNB(),
-    #QuadraticDiscriminantAnalysis()
-]
+
+
 
 kfold=5
-seed=7
-dsratio=1
-summaryDF=modelselect(df,classifiers,0.1,dsratio,kfold,seed)
-print(summaryDF)
-
-
+seed=1
 
 classifiers = [
     ('XGB_cus5', XGBClassifier(max_depth=5)),
@@ -116,23 +104,37 @@ classifiers = [
     ('DT5', DecisionTreeClassifier(max_depth=5)),
     ('DT3', DecisionTreeClassifier(max_depth=3))
 ]
-dsratio=0.05
-summaryDF=modelselect(df,classifiers,0.1,dsratio,kfold,seed,weightadj=False)
+kfoldds=0.01
+dsratio=0.25
+summaryDF=modeltrain.modelselect(df,featurecols,classifiers,kfoldds,dsratio,kfold,seed,weightadj=False)
 print(summaryDF)
 
-
+kfoldds=0.01
+dsratio=0.1
+minNeighbor=np.round(len(df)*(kfold-1)/kfold*dsratio*kfoldds*0.005).astype(int)
+print("min neighbor: ",minNeighbor)
 classifiers = \
-    [('KN_5',KNeighborsClassifier(5)),
-    ('KN_5D',KNeighborsClassifier(5,weights = 'distance')),
-    ('KN_10',KNeighborsClassifier(10)),
-    ('KN_10D',KNeighborsClassifier(10,weights = 'distance')),
-    ('KN_20',KNeighborsClassifier(20)),
-    ('KN_20D',KNeighborsClassifier(20,weights = 'distance'))]
+    [('KN_1',KNeighborsClassifier(minNeighbor)),
+    ('KN_1D',KNeighborsClassifier(minNeighbor,weights = 'distance')),
+    ('KN_2',KNeighborsClassifier(minNeighbor*2)),
+    ('KN_2D',KNeighborsClassifier(minNeighbor*2,weights = 'distance')),
+    ('KN_4',KNeighborsClassifier(minNeighbor*4)),
+    ('KN_4D',KNeighborsClassifier(minNeighbor*4,weights = 'distance'))]
 #10D is the winner in this setup
-dsratio=0.05
-summaryDF=modelselect(df,classifiers,0.1,dsratio,kfold,seed,weightadj=True)
+summaryDF=modeltrain.modelselect(df,featurecols,classifiers,kfoldds,dsratio,kfold,seed,weightadj=True)
 print(summaryDF)
 
+summaryDF=modeltrain.modelselect(df,featurecols,classifiers,kfoldds,dsratio,kfold,seed,weightadj=False)
+print(summaryDF)
+
+#######diagonosis
+targetstock='AFL'
+model=XGBClassifier(max_depth=3,max_delta_step=3)
+kfoldds=0.01
+dsratio=0.25
+newdf = modeltrain.modelDiagonose(df,targetstock,featurecols,model,kfoldds,dsratio,seed,weightadj=True)
+
+#######diagonosis
 
 #those don't work
 classifiers = [
@@ -145,7 +147,7 @@ classifiers = [
     ('LR_2',LogisticRegression(penalty='l2'))
 ]
 dsratio=0.05
-summaryDF=modelselect(df,classifiers,0.1,dsratio,kfold,seed,weightadj=False)
+summaryDF=modeltrain.modelselect(df,classifiers,0.1,dsratio,kfold,seed,weightadj=False)
 print(summaryDF)
 
 

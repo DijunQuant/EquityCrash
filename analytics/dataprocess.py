@@ -1,13 +1,24 @@
 import numpy as np
 import pandas as pd
 import s3fs
-import os
-from scipy import interpolate
+import boto3
+import os,io,gzip
+
+import sys
+if sys.version_info < (3, 0):
+    import StringIO
+    #stringIO=io.BytesIO()
+    stringIO=StringIO.StringIO()
+else:
+    stringIO = io.StringIO()
+
+
 import multiprocessing as mp
 import static
 
 
 fs = s3fs.S3FileSystem()
+s3_resource = boto3.resource('s3')
 
 venue=['NYSE_MKT','NASDAQ_BX','BATS_EDGA','BATS_EDGX','CHX','NYSE','NYSE_ARCA',\
        'NASDAQ','IEX','NASDAQ_PSX','BATS_BYX','BATS_BZX']
@@ -33,14 +44,14 @@ parameter={'crash_in_second':60*30, #to reach peak/bottom
            'bookrank_in_day':5
             }
 ####
-def computeFeatureForEquities(num,local,parallel=True,output_local=None):
+def computeFeatureForEquities(num,local,parallel=True,output_local=None,output_verbose=False):
     to_run=[name for name in static.equitties_train if (name not in static.equities_done)]
     if len(to_run)<num: return
 
     if parallel:
         processes = [
             mp.Process(target=computeFeatureForEquity,\
-                   args=(equity,parameter, pd.datetime(2017,2,3),pd.datetime(2017,11,29),local,output_local))\
+                   args=(equity,parameter, pd.datetime(2017,2,3),pd.datetime(2017,11,29),local,output_local,output_verbose))\
             for equity in to_run[:num]]
         # Run processes
         for p in processes:
@@ -54,26 +65,32 @@ def computeFeatureForEquities(num,local,parallel=True,output_local=None):
         for equity in to_run[:num]:
             computeFeatureForEquity(equity,parameter, pd.datetime(2017,2,3),pd.datetime(2017,11,29),local,output_local)
 
-def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_local=None):
+
+def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_local=None,output_verbose=False,computeNewFeature=False):
     #hdf = pd.HDFStore(folder+'features//'+equity+'.h5')
     #output=pd.DataFrame()
     #df = pd.DataFrame(columns=['date', 'range', 'change']).set_index('date')
-    histbookdata =pd.DataFrame(columns=['date']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
+    histbookdata =pd.DataFrame(columns=['date','spread','litvolume']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
                                        [site + 'all_ask' for site in['','NYSE', 'NASDAQ', 'BATS']])
     datelist=[]
     if output_local==None: output_local=local
+    #if computeSpread: return #save the template for adding features
+    alldata=pd.DataFrame()
+
     if output_local:
         outputpath = localroot
-        if not os.path.exists(outputpath + 'features//' + equity + '//'):
-            os.mkdir(outputpath + 'features//' + equity + '//')
+        if computeNewFeature:
+            if not os.path.exists(outputpath + 'newfeatures//' + equity + '//'):
+                os.mkdir(outputpath + 'newfeatures//' + equity + '//')
+        else:
+            if not os.path.exists(outputpath + 'features//' + equity + '//'):
+                os.mkdir(outputpath + 'features//' + equity + '//')
     else:
         outputpath = s3root
         #if not fs.exists(outputpath + 'features//' + equity + '//'):
         #    fs.mkdir(outputpath + 'features//' + equity + '//')
-
     if local:
         prefixpath=localroot+equity
-
         for file in os.listdir(prefixpath):
             if file.startswith('.'): continue
             filenameparser=file.split('.')[0].split('-')
@@ -96,29 +113,55 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
             continue
         file=equity+'-'+thisdate.strftime('%Y-%m-%d')+'.csv.gz'
         print(thisdate, len(histbookdata), prefixpath + '/' + file)
-
         df = getDataAndFilter(prefixpath + '/' + file).reset_index()
         if len(df) > 0:
             df['date'] = thisdate.date()
+            df['spread']=df['askpx']-df['bidpx']
+            df['litvolume']=(df['buy']+df['sell']+df['sell']).rolling(window=parameter['sample_interval']).mean()
             for side in ['_ask', '_bid']:
                 df['all' + side] = df[[x + side for x in venue]].sum(axis=1)
                 for major in ['NYSE', 'NASDAQ', 'BATS']:
                     df[major + 'all' + side] = df[[x + side for x in venue if major in x]].sum(axis=1)
                 df = df.drop([x + side for x in venue], axis=1)
-            outputfile=outputpath + 'features/' + equity + '/' + thisdate.strftime('%Y%m%d') + '.csv'
+            if computeNewFeature:
+                outputfile = outputpath + 'newfeatures/' + equity + '/' + thisdate.strftime('%Y%m%d') + '.csv'
+            else:
+                outputfile=outputpath + 'features/' + equity + '/' + thisdate.strftime('%Y%m%d') + '.csv'
 
             if output_local:
                 if not os.path.exists(outputfile):
-                    computeFeatures(df, thisdate, param, histbookdata).to_csv(outputpath + 'features//' + equity + '//' + thisdate.strftime('%Y%m%d') + '.csv')
+                    if computeNewFeature:
+                        computeFeaturesNew(df, thisdate, param, histbookdata,['litvolume']).to_csv(outputfile)
+                    else:
+                        computeFeatures(df, thisdate, param, histbookdata).to_csv(outputfile)
             else:
                 #print('check exist',outputfile,fs.exists(outputfile))
                 if not fs.exists(outputfile):
-                    bytes_to_write = computeFeatures(df, thisdate, param, histbookdata).to_csv(None).encode()
+                    result=computeFeatures(df, thisdate, param, histbookdata)
+                    alldata = pd.concat([alldata, result])
+                    if output_verbose:
+                        bytes_to_write = result.to_csv(None).encode()
+                        with fs.open(outputfile, 'wb') as f:
+                            f.write(bytes_to_write)
+                else:
+                    result=pd.read_csv(outputfile)
+                    alldata = pd.concat([alldata, result])
+            histbookdata=updatehistbookdata(df,param,histbookdata)
+    #write the all data
+    if computeNewFeature: return #don't need to combine for a patch run
+    if output_local:
+        alldata.to_csv(outputpath + 'features//' + equity + '.csv.gz',compression='gzip')
+    else:
+        csv_buffer = stringIO
+        alldata.to_csv(csv_buffer)
+        csv_buffer.seek(0)
+        gz_buffer=io.BytesIO()
+        with gzip.GzipFile(mode='w', fileobj=gz_buffer) as gz_file:
+            #gz_file.write(bytes(csv_buffer.getvalue(), 'utf-8'))
+            gz_file.write(csv_buffer.getvalue().encode('utf-8'))
 
-                    with fs.open(outputfile, 'wb') as f:
-                        f.write(bytes_to_write)
-            histbookdata = updatehistbookdata(df,param,histbookdata)
-
+        s3_object = s3_resource.Object('equity-flash', 'features/' + equity + '_all.csv.gz')
+        s3_object.put(Body=gz_buffer.getvalue())
 
 def updatehistbookdata(df,param,histbookdata):
     if len(histbookdata['date'].unique())>=param['bookrank_in_day']:
@@ -127,12 +170,14 @@ def updatehistbookdata(df,param,histbookdata):
         #print(thisdate, 'drop ' + str(mindate),len(histbookdata))
     #update histbookdata
 
-    return pd.concat([histbookdata,df[['date']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
+    return pd.concat([histbookdata,df[['date','spread','litvolume']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
                                              [site + 'all_ask' for site in['','NYSE', 'NASDAQ', 'BATS']]]])
 
 def computeFeatures(df,thisdate,param,histbookdata):
     bookfeatures = computeBookFeature(df,thisdate,param,histbookdata)
-    if len(bookfeatures)<1: return pd.DataFrame()
+    spreadfeature = computeSpreadFeature(df, thisdate, param, histbookdata)
+    if (len(bookfeatures)<1) or (len(spreadfeature)<1):
+        return pd.DataFrame()
     calcImb(df)
     df['alltradeimb']=df['tradeimb']+df['otherimb']
     df.index=pd.to_datetime(thisdate)+pd.to_timedelta(df['ts'])
@@ -156,10 +201,42 @@ def computeFeatures(df,thisdate,param,histbookdata):
         rolling(param['autocorr_window']).apply(lambda x: pd.Series(x).autocorr(1))
     result=pd.merge_asof(result,autocorr_df, left_index=True,right_index=True, suffixes=('', '_auto'))
     result = result.merge(bookfeatures,how='left',left_index=True,right_index=True)
+    result = result.merge(spreadfeature, how='left', left_index=True, right_index=True)
+
+    result=result.dropna().resample(str(param['sample_interval'])+'S').last()
+    return result
+
+def computeFeaturesNew(df,thisdate,param,histbookdata,featurenames):
+    newFeature = computeGeneralFeature(df,thisdate,param,histbookdata,featurenames)
+    if len(newFeature)<1: return pd.DataFrame()
+    result = newFeature
 
     result=result.dropna().resample(str(param['sample_interval'])+'S').last()
     return result
 def computeBookFeature(df,thisdate,param,histbookdata):
+    result=pd.DataFrame()
+
+    def interprank(key):
+        ylist = np.arange(0.05, 1, 0.05)
+        xlist = histbookdata[key].quantile(ylist).values
+        #print(df[key].values)
+        result[key] = np.interp(np.array(df[key].values,dtype='float64'), \
+                                np.array(xlist,dtype='float64'), np.array(ylist,dtype='float64'), left=0., right=1.)
+        #f = interpolate.interp1d(xlist, ylist, fill_value=(0, 1))
+        #result[key] = list(map(f, df[key].values))
+        result[key]= result[key].rolling(param['rolling_window']).mean()
+
+    if len(histbookdata['date'].unique())>=param['bookrank_in_day']:
+        for side in ['_ask', '_bid']:
+            for site in ['','NYSE', 'NASDAQ', 'BATS']:
+                interprank(site + 'all' + side)
+
+        result['date']= thisdate
+        result.index = pd.to_datetime(result['date']) + pd.to_timedelta(df['ts'])
+        result.drop(['date'],axis=1,inplace=True)
+    #print('append:',thisdate,len(df),len(histbookdata),histbookdata['date'].unique())
+    return result
+def computeSpreadFeature(df,thisdate,param,histbookdata):
     result=pd.DataFrame()
 
     def interprank(key):
@@ -174,9 +251,30 @@ def computeBookFeature(df,thisdate,param,histbookdata):
         result[key]= result[key].rolling(param['rolling_window']).mean()
 
     if len(histbookdata['date'].unique())>=param['bookrank_in_day']:
-        for side in ['_ask', '_bid']:
-            for site in ['','NYSE', 'NASDAQ', 'BATS']:
-                interprank(site + 'all' + side)
+        for key in ['spread']:
+            interprank(key)
+
+        result['date']= thisdate
+        result.index = pd.to_datetime(result['date']) + pd.to_timedelta(df['ts'])
+        result.drop(['date'],axis=1,inplace=True)
+    #print('append:',thisdate,len(df),len(histbookdata),histbookdata['date'].unique())
+    return result
+def computeGeneralFeature(df,thisdate,param,histbookdata,featurenames):
+    result=pd.DataFrame()
+    def interprank(key):
+        ylist = np.arange(0.05, 1, 0.05)
+        xlist = histbookdata[key].quantile(ylist).values
+        #print(df[key].values)
+        result[key] = np.interp(np.array(df[key].values,dtype='float64'), \
+                                np.array(xlist,dtype='float64'), np.array(ylist,dtype='float64'), left=0., right=1.)
+
+        #f = interpolate.interp1d(xlist, ylist, fill_value=(0, 1))
+        #result[key] = list(map(f, df[key].values))
+        result[key]= result[key].rolling(param['rolling_window']).mean()
+
+    if len(histbookdata['date'].unique())>=param['bookrank_in_day']:
+        for key in featurenames:
+            interprank(key)
 
         result['date']= thisdate
         result.index = pd.to_datetime(result['date']) + pd.to_timedelta(df['ts'])
@@ -221,21 +319,29 @@ def calcImb(df):
 
 
 def getDataAndFilter(gzfile):
-    df = pd.read_csv(gzfile, compression='gzip',
+    errorcnt=0
+    while errorcnt<3:
+        try:
+            df = pd.read_csv(gzfile, compression='gzip',
                      names=datacolume).set_index('ts')
-    df=df[df['bidpx']>0]
-    df=df[df['askpx']>0]
-    if len(df) < 1: return df
-    df['mid'] = (df['bidpx'] + df['askpx']) / 2
-    df['futuretrd'] = df['buy'] + df['sell'] +df['other']+df['trf']
-    df['futuretrd']=df['futuretrd'].rolling(filterChgMin*60).sum().shift(-filterChgMin*60)
-    firstTradeIndex = df[df['futuretrd'] > 0].index[0]
-    df=df[firstTradeIndex:]
-    if len(df[df['futuretrd']==0])>0:
-        firstNoTradeIndex=df[df['futuretrd']==0].index[0]
-        print('excl data for no trade',gzfile,len(df),len(df[:firstNoTradeIndex]))
-        df=df[:firstNoTradeIndex]
-    return df.drop(['futuretrd'],axis=1)
+
+            df=df[df['bidpx']>0]
+            df=df[df['askpx']>0]
+            if len(df) < 1: return df
+            df['mid'] = (df['bidpx'] + df['askpx']) / 2
+            df['futuretrd'] = df['buy'] + df['sell'] +df['other']+df['trf']
+            df['futuretrd']=df['futuretrd'].rolling(filterChgMin*60).sum().shift(-filterChgMin*60)
+            firstTradeIndex = df[df['futuretrd'] > 0].index[0]
+            df=df[firstTradeIndex:]
+            if len(df[df['futuretrd']==0])>0:
+                firstNoTradeIndex=df[df['futuretrd']==0].index[0]
+                print('excl data for no trade',gzfile,len(df),len(df[:firstNoTradeIndex]))
+                df=df[:firstNoTradeIndex]
+            return df.drop(['futuretrd'], axis=1)
+        except:
+            print("error:", sys.exc_info()[0])
+            errorcnt+=1
+    raise RuntimeError("get data fail: "+gzfile)
 
 def getData(equity, datestr,local=True):
     #df = pd.read_csv(folder + equity + '-' + datestr + '.csv', names=datacolume).set_index('ts')
@@ -290,3 +396,44 @@ def loadFeatureData(equity,local=True):
         df.drop([venue + 'all_bid' for venue in ['NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
         df.drop([venue + 'all_ask' for venue in ['NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
     return df
+def loadFeatureDataBulk(equity,truncPostMove=True):
+    df=pd.read_csv(s3root+'features/'+equity+'_all.csv.gz',compression='gzip',index_col=0)
+    if 'Unnamed: 0.1' in df.columns:
+        print(' index column missing : ' + s3root + 'features/' + equity + '_all.csv.gz')
+        df.set_index('Unnamed: 0.1', inplace=True)
+    df.index = pd.to_datetime(df.index)
+    filteredDF=pd.DataFrame()
+    datelist=df['date'].unique()
+    print(equity, len(datelist))
+    for date in datelist:
+        thisdf=df[df['date']==date].copy()
+        if len(thisdf)<filterChgMin:
+            print(equity,date,len(thisdf))
+            continue
+        #if os.path.exists(bookfeaturefolder+equity+'//'+file):
+        #    bookfeature = pd.DataFrame.from_csv(bookfeaturefolder+equity+'//'+file)
+        #    if len(bookfeature)==0:continue
+        #else: continue
+        #thisdf=thisdf.merge(bookfeature.drop(['date','mid'],axis=1),left_index=True,right_index=True)
+        #filter out the rest of the day if large move already occur
+        thisdf['chg']=(thisdf['mid'].diff()/thisdf.iloc[0]['mid']).rolling(filterChgMin).sum()
+        largeMove=thisdf[np.abs(thisdf['chg'])>filterChgThresh]
+        if truncPostMove and (len(largeMove)>0):
+            #print(equity,date,len(thisdf))
+            #print(largeMove[['mid','chg']])
+            firstMover=largeMove.index[0]
+            #print('after filter:',len(thisdf[:firstMover]))
+            thisdf=thisdf[:firstMover]
+        #filter out datapoint if total trading size is 0 for the next n minutes
+        filteredDF=pd.concat([filteredDF,thisdf.drop(['chg','running_max','running_min'],axis=1)])
+    if len(filteredDF)>0:
+        filteredDF['maxchg_abs']=np.abs(filteredDF[['maxup','maxdown']]).max(axis=1)
+        filteredDF['maxchg']=np.sign(filteredDF['maxup']+filteredDF['maxdown'])*filteredDF['maxchg_abs']
+        filteredDF['maxrange']=filteredDF['maxup']-filteredDF['maxdown']
+        filteredDF['mindepth'] = filteredDF[['all_bid', 'all_ask']].min(axis=1)
+        for feature in ['mindepth','litvolume','spread']:
+            filteredDF[feature] =2*(filteredDF[feature]-0.5)
+
+        filteredDF.drop([venue + 'all_bid' for venue in ['NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
+        filteredDF.drop([venue + 'all_ask' for venue in ['NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
+    return filteredDF

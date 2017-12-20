@@ -36,10 +36,12 @@ def stratifiedDF(n_split,seed,df,dsample=1):
         #kfsplits.append((df_indexed.loc[targetsummary.iloc[train].index].reset_index()))
     return kfsplits
 
-featurecols = ['alltradeimb_auto', 'trfimb_auto', 'trfcntimb_auto', 'totimb_auto', 'mindepth']
+#featurecols = ['alltradeimb_auto', 'trfimb_auto', 'trfcntimb_auto', 'totimb_auto', 'mindepth']
 def train_model(model, df,featurecols, kfsplits, rsratio_maj,seed=7,weightadj=False):
     # split data into X and y
-    df_indexed=df.set_index(['stock','date']).sort_index(level=0)
+    df_indexed=df.copy()
+    df_indexed['ts']=df_indexed.index
+    df_indexed=df_indexed.set_index(['stock','date']).sort_index(level=0)
     df_indexed['predict']=np.nan
     accuracy_result = []
     precision_result = []
@@ -48,7 +50,7 @@ def train_model(model, df,featurecols, kfsplits, rsratio_maj,seed=7,weightadj=Fa
         #print(wts[featurecols])
         train_data=df_indexed.loc[train_index][['target']+featurecols]
         if weightadj:
-            wts = (df_indexed.loc[train_index][['maxchg_abs'] + featurecols].corr()['maxchg_abs']).pow(2)
+            wts = (df_indexed.loc[train_index][['maxchg_abs'] + featurecols].corr()['maxchg_abs'])
             train_data[featurecols]=train_data[featurecols].mul(wts[featurecols],axis=1)
             X_test = (df_indexed.loc[test_index][featurecols].mul(wts[featurecols],axis=1)).values
         else:
@@ -75,5 +77,53 @@ def train_model(model, df,featurecols, kfsplits, rsratio_maj,seed=7,weightadj=Fa
         cm_result.append(cm)
         precision_result.append(cm[1][1] / (cm[1][0] + cm[1][1]))
         # print(confusion_matrix(Y[test], predictions))
-    return accuracy_result, precision_result, cm_result,df_indexed.groupby(['stock','date'])[['target','predict']].max()
+    return accuracy_result, precision_result, cm_result,df_indexed.dropna()
+
+def modelselect(df,features,classifiers,predsratio,dsratio,kfold,seed,weightadj=True):
+    ####classifiers need resample
+    result_dict = dict()
+    kfsplits = stratifiedDF(kfold, seed, df,dsample=predsratio)
+    for (name, model) in classifiers:
+        if name in result_dict.keys(): continue
+        accuracy_result, precision_result, cm, testDF = train_model(model, df, features, kfsplits, dsratio,weightadj=weightadj)
+        oospredict=testDF.groupby(['stock','date'])[['target','predict']].max()
+        byday = oospredict.groupby('target')['predict'].value_counts()
+        score_0 = (byday[(0, 0)] if (0, 0) in byday.index else 0) / (byday[0].sum())
+        score_1 = (byday[(1, 1)] if (1, 1) in byday.index else 0) / (byday[1].sum())
+        result_dict[name] = (np.mean(precision_result), np.mean(accuracy_result), score_0, score_1)
+        print(name+':%.3f, %.3f, %.3f, %.3f'% (np.mean(precision_result),np.mean(accuracy_result),score_0,score_1))
+    summaryDF = pd.DataFrame.from_dict(result_dict, orient='index')
+    summaryDF.columns = ['precision', 'accuracy', 'score_0', 'score_1']
+    summaryDF.sort_values(['score_1', 'score_0'], ascending=False, inplace=True)
+    return summaryDF
+
+def modelDiagonose(df,targetstock,features,model,predsratio,dsratio,seed,weightadj=True):
+    ####classifiers need resample
+    traindata=df[df['stock']!=targetstock]
+    test=df[df['stock']==targetstock].groupby(['stock', 'date'])['target'].max().index
+
+    if len(test)<1:
+        print('target not found:',targetstock)
+        return
+    targetsummary = traindata.groupby(['stock', 'date'])['target'].max()
+    majority = targetsummary.index[targetsummary == 0]
+    minority = targetsummary.index[targetsummary == 1]
+    if predsratio < 1:
+        majority = resample(majority, replace=False, n_samples=int(len(majority) * predsratio),
+                            random_state=seed)
+    train=np.concatenate([majority,minority])
+    accuracy_result, precision_result, cm, testDF = train_model(model, df, features, [(train,test)], dsratio,
+                                                                weightadj=weightadj)
+    print(accuracy_result,precision_result)
+    print(cm)
+    testDF.reset_index(level=1,inplace=True)
+
+    summaryDF=testDF.groupby('date')[['predict','target']].max()
+    print(summaryDF.reset_index().groupby(['predict','target'])['date'].count())
+    #print(summaryDF[summaryDF.max(axis=1)>0])
+    featureDF = dataprocess.loadFeatureDataBulk(targetstock,truncPostMove=False)
+
+    return featureDF[features+['mid']].merge(testDF.set_index('ts')[['predict','target','date']],left_index=True,right_index=True,how='left')\
+        .fillna(0)
+
 
