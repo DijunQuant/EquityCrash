@@ -11,7 +11,7 @@ equities_test=['A', 'ABBV', 'ADBE', 'ADS', 'AES', 'AIG', 'AKAM', 'ALL', 'AMD', '
 equitties_train=['AAL', 'AAP', 'AAPL', 'ABC', 'ABT', 'ACN', 'ADI', 'ADM', 'ADP', 'ADSK', 'AEE', 'AEP', 'AET', 'AFL',
                  'AGN', 'AIV', 'AIZ', 'AJG', 'ALB', 'ALGN', 'ALK', 'ALLE', 'ALXN', 'AMAT', 'AME', 'AMG', 'AMGN', 'AMT',
                  'AMZN', 'ANDV', 'ANTM', 'AON', 'AOS', 'APC', 'APD', 'APH', 'ARNC', 'ATVI', 'AVB', 'AVY', 'AWK', 'AXP',
-                 'AZO', 'BA', 'BAC', 'BBT', 'BBY', 'BCR', 'BEN', 'BF.B', 'BHF', 'BIIB', 'BK', 'BLK', 'BMY', 'BRK.B',
+                 'AZO', 'BA', 'BAC', 'BBT', 'BBY', 'BCR', 'BEN', 'BHF', 'BIIB', 'BK', 'BLK', 'BMY',
                  'BSX', 'BXP', 'C', 'CA', 'CAH', 'CAT', 'CB', 'CBOE', 'CBS', 'CCI', 'CDNS', 'CELG', 'CERN', 'CFG',
                  'CHD', 'CHK', 'CHTR', 'CI', 'CINF', 'CLX', 'CMA', 'CMCSA', 'CMG', 'CMI', 'CMS', 'CNP', 'COF', 'COG',
                  'COO', 'COP', 'COST', 'CPB', 'CRM', 'CSCO', 'CSX', 'CTAS', 'CTL', 'CTXS', 'CVS', 'CVX', 'D', 'DAL',
@@ -35,5 +35,9 @@ equitties_train=['AAL', 'AAP', 'AAPL', 'ABC', 'ABT', 'ACN', 'ADI', 'ADM', 'ADP',
                  'UAA', 'UAL', 'UHS', 'ULTA', 'UNH', 'UNP', 'UPS', 'URI', 'UTX', 'V', 'VAR', 'VIAB', 'VLO', 'VMC',
                  'VRSK', 'VRSN', 'VRTX', 'VZ', 'WAT', 'WBA', 'WEC', 'WFC', 'WHR', 'WM', 'WMB', 'WMT', 'WU', 'WY', 'WYN',
                  'XEC', 'XEL', 'XL', 'XOM', 'XRAY', 'XRX', 'YUM', 'ZBH', 'ZION']
-equities_done=['AAL','AAP','AAPL','ABC','ABT','ACN','ADI','ADM','ADP','ADSK','AEE','AEP','AET','AFL','AGN','CMA','DLPH','KORS','WU','ZTS']
+equities_other=['BF.B', 'BRK.B']
+equities_done=['AAL','AAP','AAPL','ABC','ABT','ACN','ADI','ADM','ADP','ADSK','AEE','AEP','AET','AFL','AGN','AIV','AIZ','AJG',
+                'ALB','ALGN','ALK','ALLE','ALXN','AME','AMG','AMAT','AMT','AMGN','AMZN','ANDV','ANTM','APC','AOS','AON','APH',
+               'APD','ARNC','ATVI','AVB','AVY','AWK','AXP','AZO','BA','BAC','BBT','BBY','BEN','BCR','BHF','BK','BLK','BIIB','BMY',
+               'CMA','DLPH','KORS','WU','ZTS']
 

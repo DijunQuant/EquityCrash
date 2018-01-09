@@ -19,8 +19,8 @@ for equity in static.equities_done:
 
 
 #for equity in static.equities_done[1:]:
-featurename='litvolume'
-for equity in static.equities_done[14:]:
+featurename='spread'
+for equity in static.equities_done:
     localfolder='Data//newfeatures/' + equity + '/'
     #remotefolder='s3://equity-flash/features/'+equity+'/'
     remotefolder = 's3://equity-flash/features/'
@@ -43,6 +43,8 @@ for equity in static.equities_done[14:]:
             #    f.write(df.to_csv(None).encode())
         #alldata=pd.concat([alldata,df])
     csv_buffer = io.StringIO()
+    if featurename in df.columns:
+        df.drop(featurename,axis=1,inplace=True)
     df.merge(alldata,left_index=True,right_index=True,how='left').to_csv(csv_buffer)
     csv_buffer.seek(0)
     gz_buffer=io.BytesIO()

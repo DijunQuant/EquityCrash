@@ -37,21 +37,21 @@ exclLastNRow=60
 
 ###
 parameter={'crash_in_second':60*30, #to reach peak/bottom
-           'rolling_window':60*5,#
+           'rolling_window':60*5,# seconds
            'autocorr_bin':10,
            'autocorr_window':30,
            'sample_interval':60,
            'bookrank_in_day':5
             }
 ####
-def computeFeatureForEquities(num,local,parallel=True,output_local=None,output_verbose=False):
+def computeFeatureForEquities(num,startdate,enddate,local,parallel=True,output_local=None,output_verbose=False):
     to_run=[name for name in static.equitties_train if (name not in static.equities_done)]
     if len(to_run)<num: return
 
     if parallel:
         processes = [
             mp.Process(target=computeFeatureForEquity,\
-                   args=(equity,parameter, pd.datetime(2017,2,3),pd.datetime(2017,11,29),local,output_local,output_verbose))\
+                   args=(equity,parameter, startdate,enddate,local,output_local,output_verbose))\
             for equity in to_run[:num]]
         # Run processes
         for p in processes:
@@ -63,7 +63,7 @@ def computeFeatureForEquities(num,local,parallel=True,output_local=None,output_v
             print(p.pid,'done')
     else:
         for equity in to_run[:num]:
-            computeFeatureForEquity(equity,parameter, pd.datetime(2017,2,3),pd.datetime(2017,11,29),local,output_local)
+            computeFeatureForEquity(equity,parameter, startdate,enddate,local,output_local)
 
 
 def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_local=None,output_verbose=False,computeNewFeature=False):
@@ -116,7 +116,7 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
         df = getDataAndFilter(prefixpath + '/' + file).reset_index()
         if len(df) > 0:
             df['date'] = thisdate.date()
-            df['spread']=df['askpx']-df['bidpx']
+            df['spread']=(df['askpx']-df['bidpx']).rolling(window=parameter['sample_interval']).mean()
             df['litvolume']=(df['buy']+df['sell']+df['sell']).rolling(window=parameter['sample_interval']).mean()
             for side in ['_ask', '_bid']:
                 df['all' + side] = df[[x + side for x in venue]].sum(axis=1)
@@ -131,7 +131,8 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
             if output_local:
                 if not os.path.exists(outputfile):
                     if computeNewFeature:
-                        computeFeaturesNew(df, thisdate, param, histbookdata,['litvolume']).to_csv(outputfile)
+                        #computeFeaturesNew(df, thisdate, param, histbookdata,['litvolume']).to_csv(outputfile)
+                        computeFeaturesNew(df, thisdate, param, histbookdata, ['spread']).to_csv(outputfile)
                     else:
                         computeFeatures(df, thisdate, param, histbookdata).to_csv(outputfile)
             else:
@@ -144,7 +145,7 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
                         with fs.open(outputfile, 'wb') as f:
                             f.write(bytes_to_write)
                 else:
-                    result=pd.read_csv(outputfile)
+                    result=pd.read_csv(outputfile,index_col=0)
                     alldata = pd.concat([alldata, result])
             histbookdata=updatehistbookdata(df,param,histbookdata)
     #write the all data
@@ -176,6 +177,7 @@ def updatehistbookdata(df,param,histbookdata):
 def computeFeatures(df,thisdate,param,histbookdata):
     bookfeatures = computeBookFeature(df,thisdate,param,histbookdata)
     spreadfeature = computeSpreadFeature(df, thisdate, param, histbookdata)
+    volumefeature = computeGeneralFeature(df, thisdate, param, histbookdata,['litvolume'])
     if (len(bookfeatures)<1) or (len(spreadfeature)<1):
         return pd.DataFrame()
     calcImb(df)
@@ -202,6 +204,7 @@ def computeFeatures(df,thisdate,param,histbookdata):
     result=pd.merge_asof(result,autocorr_df, left_index=True,right_index=True, suffixes=('', '_auto'))
     result = result.merge(bookfeatures,how='left',left_index=True,right_index=True)
     result = result.merge(spreadfeature, how='left', left_index=True, right_index=True)
+    result = result.merge(volumefeature, how='left', left_index=True, right_index=True)
 
     result=result.dropna().resample(str(param['sample_interval'])+'S').last()
     return result
@@ -238,7 +241,6 @@ def computeBookFeature(df,thisdate,param,histbookdata):
     return result
 def computeSpreadFeature(df,thisdate,param,histbookdata):
     result=pd.DataFrame()
-
     def interprank(key):
         ylist = np.arange(0.05, 1, 0.05)
         xlist = histbookdata[key].quantile(ylist).values
@@ -364,7 +366,7 @@ def getData(equity, datestr,local=True):
 
 
 filterChgMin=10
-filterChgThresh=0.015
+filterChgThresh=0.02
 def loadFeatureData(equity,local=True):
     df=pd.DataFrame()
     featurefolder=(localroot if local else s3root)+'features/'+equity+'/'
@@ -396,7 +398,7 @@ def loadFeatureData(equity,local=True):
         df.drop([venue + 'all_bid' for venue in ['NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
         df.drop([venue + 'all_ask' for venue in ['NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
     return df
-def loadFeatureDataBulk(equity,truncPostMove=True):
+def loadFeatureDataBulk(equity,truncPostMove=True,temperAtOpen=[]):
     df=pd.read_csv(s3root+'features/'+equity+'_all.csv.gz',compression='gzip',index_col=0)
     if 'Unnamed: 0.1' in df.columns:
         print(' index column missing : ' + s3root + 'features/' + equity + '_all.csv.gz')
@@ -404,7 +406,8 @@ def loadFeatureDataBulk(equity,truncPostMove=True):
     df.index = pd.to_datetime(df.index)
     filteredDF=pd.DataFrame()
     datelist=df['date'].unique()
-    print(equity, len(datelist))
+    #print(equity, len(datelist),datelist)
+    #print(df.groupby('date')['mid'].count()[:20])
     for date in datelist:
         thisdf=df[df['date']==date].copy()
         if len(thisdf)<filterChgMin:
@@ -425,15 +428,24 @@ def loadFeatureDataBulk(equity,truncPostMove=True):
             #print('after filter:',len(thisdf[:firstMover]))
             thisdf=thisdf[:firstMover]
         #filter out datapoint if total trading size is 0 for the next n minutes
+        if len(temperAtOpen)>0:
+            thisdf['factor']=range(len(thisdf))
+            thisdf['factor']= np.tanh(thisdf['factor'])
+#factor is from 0 to 1, in order to neutralize the first few minutes
         filteredDF=pd.concat([filteredDF,thisdf.drop(['chg','running_max','running_min'],axis=1)])
     if len(filteredDF)>0:
         filteredDF['maxchg_abs']=np.abs(filteredDF[['maxup','maxdown']]).max(axis=1)
         filteredDF['maxchg']=np.sign(filteredDF['maxup']+filteredDF['maxdown'])*filteredDF['maxchg_abs']
         filteredDF['maxrange']=filteredDF['maxup']-filteredDF['maxdown']
         filteredDF['mindepth'] = filteredDF[['all_bid', 'all_ask']].min(axis=1)
+        for venue in ['NYSE', 'NASDAQ', 'BATS']:
+            filteredDF['mindepth'+venue] = filteredDF[[venue+'all_bid', venue+'all_ask']].min(axis=1)
+            filteredDF['mindepth'+venue] = 2 * (filteredDF['mindepth'+venue] - 0.5)
         for feature in ['mindepth','litvolume','spread']:
             filteredDF[feature] =2*(filteredDF[feature]-0.5)
+            if feature in temperAtOpen:
+                filteredDF[feature]=filteredDF[feature]*filteredDF['factor']
 
-        filteredDF.drop([venue + 'all_bid' for venue in ['NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
-        filteredDF.drop([venue + 'all_ask' for venue in ['NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
+        filteredDF.drop([venue + 'all_bid' for venue in ['','NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
+        filteredDF.drop([venue + 'all_ask' for venue in ['','NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
     return filteredDF
