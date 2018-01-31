@@ -6,11 +6,10 @@ import os,io,gzip
 
 import sys
 if sys.version_info < (3, 0):
-    import StringIO
-    #stringIO=io.BytesIO()
-    stringIO=StringIO.StringIO()
+    import StringIO as myio
 else:
-    stringIO = io.StringIO()
+    import io as myio
+
 
 
 import multiprocessing as mp
@@ -44,15 +43,12 @@ parameter={'crash_in_second':60*30, #to reach peak/bottom
            'bookrank_in_day':5
             }
 ####
-def computeFeatureForEquities(num,startdate,enddate,local,parallel=True,output_local=None,output_verbose=False):
-    to_run=[name for name in static.equitties_train if (name not in static.equities_done)]
-    if len(to_run)<num: return
-
+def computeFeatureForEquities(to_run,startdate,enddate,local,parallel=True,output_local=None,output_verbose=False,overwrite=False):
     if parallel:
         processes = [
             mp.Process(target=computeFeatureForEquity,\
-                   args=(equity,parameter, startdate,enddate,local,output_local,output_verbose))\
-            for equity in to_run[:num]]
+                   args=(equity,parameter, startdate,enddate,local,output_local,output_verbose,False,overwrite))\
+            for equity in to_run]
         # Run processes
         for p in processes:
             p.start()
@@ -62,11 +58,26 @@ def computeFeatureForEquities(num,startdate,enddate,local,parallel=True,output_l
             p.join()
             print(p.pid,'done')
     else:
-        for equity in to_run[:num]:
-            computeFeatureForEquity(equity,parameter, startdate,enddate,local,output_local)
+        for equity in to_run:
+            computeFeatureForEquity(equity,parameter, startdate,enddate,local,output_local,output_verbose,False,overwrite)
+
+def computeFeatureForEquitiesWraper(num,startdate,enddate,local,parallel=True,output_local=None,output_verbose=False,overwrite=False):
+    if type(num)==int:
+        to_run=[name[0] for name in static.equities_train if (name[0] not in static.equities_done)]
+        if len(to_run)>num:
+            to_run=to_run[:num]
+        print('number',to_run)
+    elif type(num)==str:
+        to_run = [name[0] for name in static.equities_train if (name[0].startswith(num))]
+        print('first letter',num,to_run)
 
 
-def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_local=None,output_verbose=False,computeNewFeature=False):
+    if len(to_run)<1: return
+    computeFeatureForEquities(to_run, startdate, enddate, local, parallel=parallel, output_local=output_local, output_verbose=output_verbose,overwrite=overwrite)
+
+
+def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_local=None,output_verbose=False,\
+                            computeNewFeature=False,overwrite=False):
     #hdf = pd.HDFStore(folder+'features//'+equity+'.h5')
     #output=pd.DataFrame()
     #df = pd.DataFrame(columns=['date', 'range', 'change']).set_index('date')
@@ -89,6 +100,12 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
         outputpath = s3root
         #if not fs.exists(outputpath + 'features//' + equity + '//'):
         #    fs.mkdir(outputpath + 'features//' + equity + '//')
+    if fs.exists(outputpath + 'features/' + equity + '_all.csv.gz'):
+        if (overwrite):
+            fs.rm(outputpath + 'features/' + equity + '_all.csv.gz')
+        else:
+            return
+
     if local:
         prefixpath=localroot+equity
         for file in os.listdir(prefixpath):
@@ -104,7 +121,7 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
             filenameparser = file.split('/')[-1].split('.')[0].split('-')
             thisdate = pd.datetime(int(filenameparser[1]), int(filenameparser[2]), int(filenameparser[3]))
             datelist.append(thisdate)
-    datelist=sorted(datelist)
+    datelist=sorted(list(set(datelist)))
     print(equity,len(datelist),datelist[0],datelist[-1])
 
     for thisdate in datelist:
@@ -112,7 +129,7 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
             print(thisdate,' skipped')
             continue
         file=equity+'-'+thisdate.strftime('%Y-%m-%d')+'.csv.gz'
-        print(thisdate, len(histbookdata), prefixpath + '/' + file)
+
         df = getDataAndFilter(prefixpath + '/' + file).reset_index()
         if len(df) > 0:
             df['date'] = thisdate.date()
@@ -138,6 +155,7 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
             else:
                 #print('check exist',outputfile,fs.exists(outputfile))
                 if not fs.exists(outputfile):
+                    print(thisdate, len(histbookdata), prefixpath + '/' + file)
                     result=computeFeatures(df, thisdate, param, histbookdata)
                     alldata = pd.concat([alldata, result])
                     if output_verbose:
@@ -153,9 +171,10 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
     if output_local:
         alldata.to_csv(outputpath + 'features//' + equity + '.csv.gz',compression='gzip')
     else:
-        csv_buffer = stringIO
+        csv_buffer = myio.StringIO()
         alldata.to_csv(csv_buffer)
-        csv_buffer.seek(0)
+        print(len(alldata))
+        #csv_buffer.seek(0)
         gz_buffer=io.BytesIO()
         with gzip.GzipFile(mode='w', fileobj=gz_buffer) as gz_file:
             #gz_file.write(bytes(csv_buffer.getvalue(), 'utf-8'))
@@ -367,52 +386,34 @@ def getData(equity, datestr,local=True):
 
 filterChgMin=10
 filterChgThresh=0.02
-def loadFeatureData(equity,local=True):
-    df=pd.DataFrame()
-    featurefolder=(localroot if local else s3root)+'features/'+equity+'/'
-    fileiterables=([featurefolder+x for x in os.listdir(featurefolder)] if local else ['s3://'+x for x in fs.ls(featurefolder)])
-    for file in fileiterables:
-        thisdf=pd.DataFrame.from_csv(file)
-        if len(thisdf) < 1: continue
-        #if os.path.exists(bookfeaturefolder+equity+'//'+file):
-        #    bookfeature = pd.DataFrame.from_csv(bookfeaturefolder+equity+'//'+file)
-        #    if len(bookfeature)==0:continue
-        #else: continue
-        #thisdf=thisdf.merge(bookfeature.drop(['date','mid'],axis=1),left_index=True,right_index=True)
-        #filter out the rest of the day if large move already occur
-        thisdf['chg']=(thisdf['mid'].diff()/thisdf.iloc[0]['mid']).rolling(filterChgMin).sum()
-        largeMove=thisdf[np.abs(thisdf['chg'])>filterChgThresh]
-        if len(largeMove)>0:
-            print(file,len(thisdf))
-            print(largeMove[['mid','chg']])
-            firstMover=largeMove.index[0]
-            print('after filter:',len(thisdf[:firstMover]))
-            thisdf=thisdf[:firstMover]
-        #filter out datapoint if total trading size is 0 for the next n minutes
-        df=pd.concat([df,thisdf.drop(['chg','running_max','running_min'],axis=1)])
-    if len(df)>0:
-        df['maxchg_abs']=np.abs(df[['maxup','maxdown']]).max(axis=1)
-        df['maxchg']=np.sign(df['maxup']+df['maxdown'])*df['maxchg_abs']
-        df['maxrange']=df['maxup']-df['maxdown']
-        df['mindepth'] = df[['all_bid', 'all_ask']].min(axis=1)
-        df.drop([venue + 'all_bid' for venue in ['NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
-        df.drop([venue + 'all_ask' for venue in ['NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
-    return df
-def loadFeatureDataBulk(equity,truncPostMove=True,temperAtOpen=[]):
+
+def loadFeatureDataBulk(equity,featurecols,truncPostMove=True,temperAtOpen=[],resample=1,startdate=pd.datetime(1979,9,26),enddate=pd.datetime(2020,2,2)):
+    if not fs.exists(s3root+'features/'+equity+'_all.csv.gz'):
+        print('cannot find file: ', equity)
+        return []
     df=pd.read_csv(s3root+'features/'+equity+'_all.csv.gz',compression='gzip',index_col=0)
-    if 'Unnamed: 0.1' in df.columns:
-        print(' index column missing : ' + s3root + 'features/' + equity + '_all.csv.gz')
-        df.set_index('Unnamed: 0.1', inplace=True)
+    #check data
+    x = df.groupby(level=0)['litvolume'].count()
+    if len(x[x > 1]) > 0:
+        print('duplicate time index: ',equity)
+        return []
+    #if 'Unnamed: 0.1' in df.columns:
+    #    print(' index column missing : ' + s3root + 'features/' + equity + '_all.csv.gz')
+    #    df.set_index('Unnamed: 0.1', inplace=True)
     df.index = pd.to_datetime(df.index)
     filteredDF=pd.DataFrame()
     datelist=df['date'].unique()
     #print(equity, len(datelist),datelist)
     #print(df.groupby('date')['mid'].count()[:20])
+
     for date in datelist:
+        if (pd.to_datetime(date)<startdate) or (pd.to_datetime(date)>enddate):continue
         thisdf=df[df['date']==date].copy()
         if len(thisdf)<filterChgMin:
-            print(equity,date,len(thisdf))
+            #print(equity,date,len(thisdf))
             continue
+        firsttime=thisdf.index[0]
+        thisdf['firsttime']=thisdf.index-firsttime
         #if os.path.exists(bookfeaturefolder+equity+'//'+file):
         #    bookfeature = pd.DataFrame.from_csv(bookfeaturefolder+equity+'//'+file)
         #    if len(bookfeature)==0:continue
@@ -431,21 +432,30 @@ def loadFeatureDataBulk(equity,truncPostMove=True,temperAtOpen=[]):
         if len(temperAtOpen)>0:
             thisdf['factor']=range(len(thisdf))
             thisdf['factor']= np.tanh(thisdf['factor'])
+
 #factor is from 0 to 1, in order to neutralize the first few minutes
-        filteredDF=pd.concat([filteredDF,thisdf.drop(['chg','running_max','running_min'],axis=1)])
+        thisdf['mindepth'] = thisdf[['all_bid', 'all_ask']].min(axis=1)
+        for venue in ['NYSE', 'NASDAQ', 'BATS']:
+            thisdf['mindepth'+venue] = thisdf[[venue+'all_bid', venue+'all_ask']].min(axis=1)
+            thisdf['mindepth'+venue] = 2 * (thisdf['mindepth'+venue] - 0.5)
+        for feature in ['mindepth','litvolume','spread']:
+            thisdf[feature] =2*(thisdf[feature]-0.5)
+            if feature in temperAtOpen:
+                thisdf[feature]=thisdf[feature]*thisdf['factor']
+
+        thisdf.drop([venue + 'all_bid' for venue in ['','NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
+        thisdf.drop([venue + 'all_ask' for venue in ['','NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
+
+        for feature in featurecols:
+            thisdf[feature + '_1'] = thisdf[feature].shift(2)
+            thisdf[feature + '_2'] = thisdf[feature].shift(4)
+
+        thisdf.dropna(inplace=True)
+
+        filteredDF=pd.concat([filteredDF,thisdf.iloc[::resample].drop(['chg','running_max','running_min'],axis=1)])
     if len(filteredDF)>0:
         filteredDF['maxchg_abs']=np.abs(filteredDF[['maxup','maxdown']]).max(axis=1)
         filteredDF['maxchg']=np.sign(filteredDF['maxup']+filteredDF['maxdown'])*filteredDF['maxchg_abs']
         filteredDF['maxrange']=filteredDF['maxup']-filteredDF['maxdown']
-        filteredDF['mindepth'] = filteredDF[['all_bid', 'all_ask']].min(axis=1)
-        for venue in ['NYSE', 'NASDAQ', 'BATS']:
-            filteredDF['mindepth'+venue] = filteredDF[[venue+'all_bid', venue+'all_ask']].min(axis=1)
-            filteredDF['mindepth'+venue] = 2 * (filteredDF['mindepth'+venue] - 0.5)
-        for feature in ['mindepth','litvolume','spread']:
-            filteredDF[feature] =2*(filteredDF[feature]-0.5)
-            if feature in temperAtOpen:
-                filteredDF[feature]=filteredDF[feature]*filteredDF['factor']
 
-        filteredDF.drop([venue + 'all_bid' for venue in ['','NYSE', 'NASDAQ', 'BATS'] ],axis=1,inplace=True)
-        filteredDF.drop([venue + 'all_ask' for venue in ['','NYSE', 'NASDAQ', 'BATS']], axis=1, inplace=True)
     return filteredDF

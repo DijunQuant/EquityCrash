@@ -2,10 +2,10 @@ import analytics.dataprocess as dataprocess
 import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import xgboost as xgb
-from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split
+import sys
+if sys.version_info < (3, 0):
+    import matplotlib
+    matplotlib.use('agg',warn=False, force=True)
 from sklearn.metrics import accuracy_score,confusion_matrix
 from sklearn.neural_network import MLPClassifier
 from sklearn.neighbors import KNeighborsClassifier
@@ -77,8 +77,7 @@ def train_model(model, df,featurecols, kfsplits, rsratio_maj,seed=7,weightadj=Fa
             df_indexed.loc[test_index,'predict']= predictions_prob
         else:
             if target_prob != None:
-                train_prob=model.predict_proba(X_train)
-                threshold = np.percentile(model.predict_proba(X_train), target_prob)
+                threshold = np.percentile(model.predict_proba(X_train)[:,1], target_prob)
                 predictions = (np.array(predictions_prob)>threshold).astype(int)
                 #print(threshold)
             df_indexed.loc[test_index, 'predict'] = predictions
@@ -95,50 +94,114 @@ def modelselect(df,features,classifiers,predsratio,dsratio,kfold,seed,weightadj=
     ####classifiers need resample
     result_dict = dict()
     kfsplits = stratifiedDF(kfold, seed, df,dsample=predsratio)
+    alloosdf = df.reset_index()[['target', 'maxup', 'maxdown', 'maxrange', 'stock', 'date']]
+    alloosdf['ts'] = df.index
     for (name, model) in classifiers:
         if name in result_dict.keys(): continue
+        oosdf = pd.DataFrame()
         accuracy_result, precision_result, threshold_result,cm, testDF = train_model(model, df, features, kfsplits, dsratio,\
                                                                     weightadj=weightadj,target_prob=target_prob)
-        oospredict=testDF.groupby(['stock','date'])[['target','predict']].max()
+        oosdf = pd.concat([oosdf, testDF])
+        oospredict=oosdf.groupby(['stock','date'])[['target','predict']].max()
         byday = oospredict.groupby('target')['predict'].value_counts()
         alarms = len(oospredict[oospredict['predict'] == 1])
-        score_0 = ((byday[(1, 1)] if (1, 1) in byday.index else 0) / (alarms)) if alarms>0 else 0 # chance of correct when predict positive
-        score_1 = (byday[(1, 1)] if (1, 1) in byday.index else 0) / (byday[1].sum()) #chance of not miss positive example
-        result_dict[name] = (np.mean(precision_result), np.mean(accuracy_result), score_0, score_1,alarms/len(oospredict))
+        score_0 = (float(byday[(1, 1)] if (1, 1) in byday.index else 0) / (alarms)) if alarms>0 else 0 # chance of correct when predict positive
+        score_1 = float(byday[(1, 1)] if (1, 1) in byday.index else 0) / (byday[1].sum()) #chance of not miss positive example
+        result_dict[name] = (np.mean(precision_result), np.mean(accuracy_result), score_0, score_1,float(alarms)/len(oospredict))
+        alloosdf = alloosdf.merge(
+            pd.DataFrame({name: oosdf['predict'], 'ts': oosdf['ts'], 'stock': oosdf.index.get_level_values('stock')
+                          }), on=['stock', 'ts'], how='left')
+        print(name + ':%.3f, %.3f, %.3f, %.3f, %.3f' % (
+        np.mean(precision_result), np.mean(accuracy_result), np.mean(threshold_result), score_0, score_1))
+    summaryDF = pd.DataFrame.from_dict(result_dict, orient='index')
+    summaryDF.columns = ['precision', 'accuracy', 'score_0', 'score_1','alarm']
+    summaryDF.sort_values(['score_1', 'score_0'], ascending=False, inplace=True)
+    return summaryDF,alloosdf
+
+def modelselectbytime(df,timecut,features,classifiers,predsratio,dsratio,kfold,seed,weightadj=True,target_prob=None):
+    result_dict = dict()
+    thisdf = [df[df['firsttime'] < pd.to_timedelta(timecut)],df[df['firsttime'] >= pd.to_timedelta(timecut)]]
+    kfsplits = [stratifiedDF(kfold, seed, thisdf[0], dsample=predsratio),stratifiedDF(kfold, seed, thisdf[1], dsample=predsratio)]
+    alloosdf=df.reset_index()[['target','maxup','maxdown','maxrange','stock','date']]
+    alloosdf['ts']=df.index
+
+    for (name, model) in classifiers:
+        if name in result_dict.keys(): continue
+        oosdf=pd.DataFrame()
+        try:
+            for i in [0,1]:
+                if type(dsratio)==float:
+                    ds=dsratio
+                else:
+                    ds=dsratio[i]
+                accuracy_result, precision_result, threshold_result,cm, testDF = train_model(model, thisdf[i], features, kfsplits[i], ds,\
+                                                                    weightadj=weightadj,target_prob=target_prob)
+                oosdf=pd.concat([oosdf,testDF])
+        except:
+            continue
+        alloosdf=alloosdf.merge(pd.DataFrame({name:oosdf['predict'],'ts':oosdf['ts'],'stock':oosdf.index.get_level_values('stock')
+}),on=['stock','ts'],how='left')
+        oospredict=oosdf.groupby(['stock','date'])[['target','predict']].max()
+        byday = oospredict.groupby('target')['predict'].value_counts()
+        alarms = len(oospredict[oospredict['predict'] == 1])
+        score_0 = float(((byday[(1, 1)] if (1, 1) in byday.index else 0)) / float(alarms)) if alarms>0 else 0 # chance of correct when predict positive
+        score_1 = float(byday[(1, 1)] if (1, 1) in byday.index else 0) / float(byday[1].sum()) #chance of not miss positive example
+        result_dict[name] = (np.mean(precision_result), np.mean(accuracy_result), score_0, score_1,float(alarms)/float(len(oospredict)))
         print(name+':%.3f, %.3f, %.3f, %.3f, %.3f'% (np.mean(precision_result),np.mean(accuracy_result),np.mean(threshold_result),score_0,score_1))
     summaryDF = pd.DataFrame.from_dict(result_dict, orient='index')
     summaryDF.columns = ['precision', 'accuracy', 'score_0', 'score_1','alarm']
     summaryDF.sort_values(['score_1', 'score_0'], ascending=False, inplace=True)
-    return summaryDF
+    return summaryDF,alloosdf
 
-def modelselectbytime(df,timecut,features,classifiers,predsratio,dsratio,kfold,seed,weightadj=True,target_prob=None):
+def modelfitbytime(df,timecut,features,model,predsratio,dsratio,kfold,seed,weightadj=True,target_prob=None):
     #timecut = '30m'
     ####classifiers need resample
     result_dict = dict()
     thisdf = [df[df['firsttime'] < pd.to_timedelta(timecut)],df[df['firsttime'] >= pd.to_timedelta(timecut)]]
     kfsplits = [stratifiedDF(kfold, seed, thisdf[0], dsample=predsratio),stratifiedDF(kfold, seed, thisdf[1], dsample=predsratio)]
-    for (name, model) in classifiers:
-        if name in result_dict.keys(): continue
-        oosdf=pd.DataFrame()
-        for i in [0,1]:
-            accuracy_result, precision_result, threshold_result,cm, testDF = train_model(model, thisdf[i], features, kfsplits[i], dsratio,\
+    oosdf=pd.DataFrame()
+    for i in [0,1]:
+        if type(dsratio) ==float:
+            ds = dsratio
+        else:
+            ds = dsratio[i]
+        accuracy_result, precision_result, threshold_result,cm, testDF = train_model(model, thisdf[i], features, kfsplits[i], ds,\
                                                                     weightadj=weightadj,target_prob=target_prob)
-            oosdf=pd.concat([oosdf,testDF])
-        oospredict=oosdf.groupby(['stock','date'])[['target','predict']].max()
-        byday = oospredict.groupby('target')['predict'].value_counts()
-        alarms = len(oospredict[oospredict['predict'] == 1])
-        score_0 = ((byday[(1, 1)] if (1, 1) in byday.index else 0) / (alarms)) if alarms>0 else 0 # chance of correct when predict positive
-        score_1 = (byday[(1, 1)] if (1, 1) in byday.index else 0) / (byday[1].sum()) #chance of not miss positive example
-        result_dict[name] = (np.mean(precision_result), np.mean(accuracy_result), score_0, score_1,alarms/len(oospredict))
-        print(name+':%.3f, %.3f, %.3f, %.3f, %.3f'% (np.mean(precision_result),np.mean(accuracy_result),np.mean(threshold_result),score_0,score_1))
-    summaryDF = pd.DataFrame.from_dict(result_dict, orient='index')
-    summaryDF.columns = ['precision', 'accuracy', 'score_0', 'score_1','alarm']
-    summaryDF.sort_values(['score_1', 'score_0'], ascending=False, inplace=True)
-    return summaryDF
+        oosdf=pd.concat([oosdf,testDF])
+    return oosdf
+
+def modelfit(df,features,model,predsratio,dsratio,seed,weightadj=False,target_prob=None):
+    targetsummary = df.groupby(['stock', 'date'])['target'].max()
+    majority = targetsummary.index[targetsummary == 0]
+    minority = targetsummary.index[targetsummary == 1]
+    if predsratio < 1:
+        majority = resample(majority, replace=False, n_samples=int(len(majority) * predsratio),
+                            random_state=seed)
+    train=np.concatenate([majority,minority])
+
+    train_data = df.set_index(['stock','date']).sort_index(level=0).loc[train][['target','maxchg_abs'] + features]
+    if weightadj:
+        wts = train_data.corr()['maxchg_abs']
+        train_data[features] = train_data[features].mul(wts[features], axis=1)
+
+    train_minority = train_data[train_data['target'] == 1]
+    train_majority = train_data[train_data['target'] == 0]
+    if dsratio < 1:
+        train_majority = resample(train_majority, replace=False, n_samples=int(len(train_majority) * dsratio),
+                                  random_state=seed)
+    # train_minus = resample(train_minority, replace=True, n_samples=int(len(train_minority) * rsratio_min),
+    #                       random_state=seed)
+    X_train = np.concatenate([train_majority[features].values, train_minority[features].values])
+    Y_train = np.concatenate([train_majority['target'].values, train_minority['target'].values])
+    model.fit(X_train, Y_train)
+    if target_prob==None:
+        return None
+    else:
+        return np.percentile(model.predict_proba(X_train)[:,1], target_prob)
+
 
 def modelDiagonose(df,targetstock,features,model,predsratio,dsratio,seed,weightadj=True,target_prob=None,timecutoff=None):
     ####classifiers need resample
-
     if timecutoff==None:
         testDF=modelDiagonoseWork(df,targetstock,features,model,predsratio,dsratio,seed,weightadj=weightadj,target_prob=target_prob)
     else:
@@ -161,7 +224,6 @@ def modelDiagonoseWork(df,targetstock,features,model,predsratio,dsratio,seed,wei
     ####classifiers need resample
     traindata=df[df['stock']!=targetstock]
     test=df[df['stock']==targetstock].groupby(['stock', 'date'])['target'].max().index
-
     if len(test)<1:
         print('target not found:',targetstock)
         return
@@ -180,6 +242,5 @@ def modelDiagonoseWork(df,targetstock,features,model,predsratio,dsratio,seed,wei
 
     summaryDF=testDF.groupby('date')[['predict','target']].max()
     print(summaryDF.reset_index().groupby(['predict','target'])['date'].count())
-
     return testDF
 

@@ -13,10 +13,19 @@ dataprocess.computeFeatureForEquity(equity,dataprocess.parameter,pd.datetime(201
 #####generate features
 
 #####tmp patch to add new feature
-for equity in static.equities_done:
-    dataprocess.computeFeatureForEquity(equity, dataprocess.parameter, pd.datetime(2017, 2, 3),
-                                        pd.datetime(2017, 11, 29), local=False, output_local=True,computeNewFeature=True)
+for equity in static.equities_done[21:]:
+    temp = pd.read_csv('s3://equity-flash/features/'+equity+'_all.csv.gz', compression='gzip', index_col=0)
+    x = temp.groupby(level=0)['litvolume'].count()
+    if len(x[x>1])>0:
+        print('run:',equity)
+        dataprocess.computeFeatureForEquity(equity, dataprocess.parameter, pd.datetime(2017, 2, 3),
+                                        pd.datetime(2017, 11, 29), local=False, overwrite=True)
 
+
+
+#add hoc:
+for equitiy in static.equities_done:
+    dataprocess.computeFeatureForEquities(['ALGN','ALK'],pd.datetime(2017,2,3),pd.datetime(2017,11,29),False,overwrite=True)
 
 #for equity in static.equities_done[1:]:
 featurename='spread'
