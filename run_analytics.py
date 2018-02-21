@@ -6,10 +6,12 @@ import matplotlib.pyplot as plt
 import static
 import gzip
 import io
+
 equity = 'DLPH'
 
 #####generate features
-dataprocess.computeFeatureForEquity(equity,dataprocess.parameter,pd.datetime(2017,2,3),pd.datetime(2017,11,29),local=False,output_local=True)
+dataprocess.computeFeatureForEquity(equity,dataprocess.parameter,pd.datetime(2017,2,3),pd.datetime(2017,11,29),local=False,
+                                    output_local=True,computeNewFeature=True)
 #####generate features
 
 #####tmp patch to add new feature
@@ -21,15 +23,17 @@ for equity in static.equities_done[21:]:
         dataprocess.computeFeatureForEquity(equity, dataprocess.parameter, pd.datetime(2017, 2, 3),
                                         pd.datetime(2017, 11, 29), local=False, overwrite=True)
 
-
-
 #add hoc:
 for equitiy in static.equities_done:
     dataprocess.computeFeatureForEquities(['ALGN','ALK'],pd.datetime(2017,2,3),pd.datetime(2017,11,29),False,overwrite=True)
 
 #for equity in static.equities_done[1:]:
-featurename='spread'
-for equity in static.equities_done:
+featurenames=['volumebydepth','volumebymindepth']
+for equity,mc in static.equities_train:
+    if equity in ['AON','DLPH']: continue
+    dataprocess.computeFeatureForEquity(equity, dataprocess.parameter, pd.datetime(2017, 2, 3),
+                                        pd.datetime(2017, 11, 29), local=False,
+                                        output_local=True, computeNewFeature=True)
     localfolder='Data//newfeatures/' + equity + '/'
     #remotefolder='s3://equity-flash/features/'+equity+'/'
     remotefolder = 's3://equity-flash/features/'
@@ -52,8 +56,9 @@ for equity in static.equities_done:
             #    f.write(df.to_csv(None).encode())
         #alldata=pd.concat([alldata,df])
     csv_buffer = io.StringIO()
-    if featurename in df.columns:
-        df.drop(featurename,axis=1,inplace=True)
+    for featurename in featurenames:
+        if featurename in df.columns:
+            df.drop(featurename,axis=1,inplace=True)
     df.merge(alldata,left_index=True,right_index=True,how='left').to_csv(csv_buffer)
     csv_buffer.seek(0)
     gz_buffer=io.BytesIO()

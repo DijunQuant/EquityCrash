@@ -3,12 +3,12 @@ median_cap_threshold=22820
 
 equities_test=[('A', 23567), ('ABBV', 168695), ('ADBE', 96996), ('ADS', 14402), ('AES', 7637), ('AIG', 54854), ('AKAM', 11002),
                ('ALL', 37185), ('AMD', 12205), ('AMP', 26309), ('ANSS', 13761), ('APA', 17881), ('ARE', 12136), ('AVGO', 113663),
-               ('AYI', 6803), ('BAX', 38081), ('BDX', 62509), ('BHGE', 40142), ('BLL', 13265), ('BWA', 11796), ('CAG', 15366),
+               ('AYI', 6803), ('BAX', 38081), ('BDX', 62509), ('BLL', 13265), ('BWA', 11796), ('CAG', 15366),
                ('CBG', 15192), ('CCL', 48975), ('CF', 9484), ('CHRW', 13308), ('CL', 67869), ('CME', 52528), ('CNC', 19134),
                ('COL', 22492), ('COTY', 15522), ('CSRA', 5229), ('CTSH', 46004), ('CXO', 23484), ('DFS', 28318), ('DHR', 69561),
-               ('DISH', 21490), ('DOV', 16195), ('DTE', 18639), ('DWDP', 177090), ('ECL', 40431), ('EL', 49624), ('EQIX', 34122),
+               ('DISH', 21490), ('DOV', 16195), ('DTE', 18639), ('ECL', 40431), ('EL', 49624), ('EQIX', 34122),
                ('ESRX', 45619), ('ETR', 13987), ('EXPD', 11716), ('FAST', 15409), ('FDX', 73115), ('FISV', 29015), ('FLR', 8587),
-               ('FOXA', 68606), ('GD', 62210), ('GIS', 33807), ('GOOGL', 805286), ('GRMN', 11925), ('HAL', 48505), ('HCA', 32661),
+               ('FOXA', 68606), ('GIS', 33807), ('GOOGL', 805286), ('GRMN', 11925), ('HAL', 48505), ('HCA', 32661),
                ('HES', 16815), ('HOLX', 11898), ('HPQ', 39189), ('HSIC', 11913), ('IBM', 150302), ('ILMN', 35551), ('INTU', 42993),
                ('IRM', 10244), ('IVZ', 15204), ('JNJ', 396235), ('K', 23053), ('KLAC', 17931), ('KO', 201274), ('KSU', 11561),
                ('LEN', 16701), ('LLY', 88948), ('LOW', 87739), ('LYB', 46889), ('MAC', 9735), ('MCD', 140161), ('MDLZ', 66082),
@@ -19,9 +19,11 @@ equities_test=[('A', 23567), ('ABBV', 168695), ('ADBE', 96996), ('ADS', 14402), 
                ('SPG', 59043), ('STI', 32975), ('SWK', 26723), ('SYMC', 16600), ('TDG', 15364), ('TJX', 49756), ('TRIP', 5114),
                ('TSN', 35767), ('TXT', 15493), ('UDR', 9937), ('UNM', 12525), ('USB', 94251), ('VFC', 31572), ('VNO', 14729),
                ('VTR', 19614), ('WDC', 25284), ('WLTW', 20432), ('WRK', 17253), ('WYNN', 19423), ('XLNX', 18909), ('XYL', 12906),
-               ('ZTS', 37516)]
+               ('ZION', 10712),('ZTS', 37516)]
 
-equities_other=['BF.B', 'BRK.B']
+equities_other=['BF.B', 'BRK.B','BHGE','DWDP','GD',
+                'TPR'#short history from 11/1
+                ]
 
 #market cap in million
 equities_train=[('AAL', 27638), ('AAP', 8593), ('AAPL', 899825), ('ABC', 22240), ('ABT', 102904), ('ACN', 99536), ('ADI', 35496),
@@ -71,13 +73,13 @@ equities_train=[('AAL', 27638), ('AAP', 8593), ('AAPL', 899825), ('ABC', 22240),
                 ('SLB', 109186), ('SLG', 9462), ('SNI', 11519), ('SNPS', 13875), ('SO', 44717), ('SPGI', 45868), ('SRCL', 6061),
                 ('SRE', 26605), ('STT', 40002), ('STX', 15344), ('STZ', 42751), ('SWKS', 18012), ('SYF', 30628), ('SYK', 60511),
                 ('SYY', 32905), ('T', 229783), ('TAP', 17994), ('TEL', 35494), ('TGT', 42622), ('TIF', 13610), ('TMK', 10659),
-                ('TMO', 85833), ('TPR', 13471), ('TROW', 28423), ('TRV', 37713), ('TSCO', 10251), ('TSS', 15381), ('TWX', 72830),
+                ('TMO', 85833), ('TROW', 28423), ('TRV', 37713), ('TSCO', 10251), ('TSS', 15381), ('TWX', 72830),
                 ('TXN', 116434), ('UA', 6059), ('UAA', 6011), ('UAL', 22536), ('UHS', 11060), ('ULTA', 14345), ('UNH', 235493),
                 ('UNP', 111483), ('UPS', 113981), ('URI', 15698), ('UTX', 108044), ('V', 279971), ('VAR', 10060), ('VIAB', 13894),
                 ('VLO', 43281), ('VMC', 17553), ('VRSK', 16258), ('VRSN', 11287), ('VRTX', 40550), ('VZ', 215394), ('WAT', 16959),
                 ('WBA', 75861), ('WEC', 20001), ('WFC', 317024), ('WHR', 11894), ('WM', 38393), ('WMB', 27010), ('WMT', 310768),
                 ('WU', 9379), ('WY', 27151), ('WYN', 12843), ('XEC', 11960), ('XEL', 23154), ('XL', 9292), ('XOM', 371637),
-                ('XRAY', 14100), ('XRX', 8289), ('YUM', 28277), ('ZBH', 25356), ('ZION', 10712)]
+                ('XRAY', 14100), ('XRX', 8289), ('YUM', 28277), ('ZBH', 25356)]
 
 equities_done=['AAL','AAP','AAPL','ABC','ABT','ACN','ADI','ADM','ADP','ADSK','AEE','AEP','AET','AFL','AGN','AIV','AIZ','AJG',
                 'ALB','ALGN','ALK','ALLE','ALXN','AME','AMG','AMAT','AMT','AMGN','AMZN','ANDV','ANTM','APC','AOS','AON','APH',
@@ -99,6 +101,18 @@ equities_done=['AAL','AAP','AAPL','ABC','ABT','ACN','ADI','ADM','ADP','ADSK','AE
                'NEE','NFX','NDAQ','NFLX','NAVI','NCLH','NSC','NOV','NTAP','NLSN','NOC','NVDA','NI','NTRS','NWL','NWS',
                'OXY','O','OMC','PAYX','ORLY','OKE','PFE','PCAR','PCG','PEG','PG','PEP','PCLN','PGR','PKG','PNW','PKI','PPL',
                'PNR','PNC','PH','PLD','PYPL','PWR','PVH','PXD','PSX','PRU','PRGO',
-               'Q',
+               'Q','QRVO',
                'RCL', 'RE', 'REGN', 'RF','RHI','RJF', 'RL', 'RMD', 'ROP','ROST', 'RRC','RTN',
-               'WU','ZTS']
+               'SJM','SLB','SBAC','SEE','SCHW','SBUX','SHW','SRE','STT','SLG','SNPS','SRCL','SPGI','SO','SNI','SYY','SYF','STX','SYK','STZ','SWKS',
+               'T','TAP','TGT','TMK','TROW','TRV','TIF','TMO','TEL','TSS','TXN','TWX','TSCO',
+               'UA', 'UAA', 'UAL', 'UHS', 'ULTA', 'UNH','UNP', 'UPS', 'URI', 'UTX','V','VIAB','VAR','VZ','VLO','VRSN','VMC','VRSK','VRTX',
+               'WBA','WAT','WFC','WMT','WHR','WM','WMB','WYN','WEC','WY','WU',
+               'XRX','XRAY','XEC','XOM','XEL','XL','YUM','ZBH','ZTS',
+               'AKAM','ADBE','ALL','ABBV','AES','AIG','A','ADS','APA','AVGO','ARE','AMD','ANSS','AYI','AMP',
+               'BAX','BLL','BDX','CAG','CBG', 'CCL', 'CF', 'CHRW', 'CL', 'CME', 'CNC','COL', 'COTY', 'CSRA', 'CTSH','CXO',
+               'DOV', 'BWA', 'DISH', 'DFS', 'DHR','ESRX','EQIX','ECL','ETR','EL','DTE','EXPD',
+               'FISV','FOXA','FDX','FOXA','FAST','FLR','GOOGL','GIS','GRMN',
+               'HES','HCA','HAL','HOLX','HSIC','HPQ','IBM','INTU','IRM','ILMN','IVZ','JNJ','KLAC','K','KO','KSU',
+               'LEN','MCD','LOW','LLY','LYB','MAC',
+               'PBCT','PDCO', 'PFG', 'PHM', 'PM','PPG', 'PSA','PX',
+               ]

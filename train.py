@@ -15,26 +15,16 @@ from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 pd.set_option('display.float_format', lambda x: '%.3f' % x)
 
-featurecolsbase=['alltradeimb_auto','trfimb_auto','trfcntimb_auto','totimb_auto','mindepthNYSE', 'mindepthNASDAQ', 'mindepthBATS','spread','litvolume']
+import train_helper
+import gc
 
-resample_freq=1 #minute
-df=pd.DataFrame()
-
-equitydict=dict(static.equities_train)
-
-equitylist=[x[0] for x in static.equities_train if ((x[0] in static.equities_done) and (equitydict[x[0]]>static.median_cap_threshold))]
-print(len(static.equities_done),len(equitylist))
+featurecolsbase = ['alltradeimb_auto', 'trfimb_auto', 'trfcntimb_auto', 'totimb_auto', 'mindepthNYSE',
+                   'mindepthNASDAQ', 'mindepthBATS', 'spread', 'litvolume']
+largeCap=False
 
 
-#equitylist=[x for x in static.equities_done if (x in static.equitties_train)]
-for equity in equitylist:
-    #thisDF=dataprocess.loadFeatureDataBulk(equity,featurecolsbase,temperAtOpen=[],resample=resample_freq,startdate=pd.datetime(2017,5,29))
-    thisDF = dataprocess.loadFeatureDataBulk(equity, featurecolsbase, temperAtOpen=[], resample=resample_freq)
-    if len(thisDF)>0:
-        thisDF['stock']=equity
-        df=pd.concat([df,thisDF])
-df.dropna(inplace=True)
-
+df = train_helper.main(largeCap,featurecolsbase)
+gc.collect()
 #df.to_csv('Data/features/tmp_20180109.csv')
 
 
@@ -54,8 +44,8 @@ df.dropna(inplace=True)
 
 ######crash method 1
 df = df[df['firsttime']>pd.to_timedelta('3m')]
-crash_thrshld=0.02 #for small cap
-crash_thrshld=0.0175 #for large cap
+
+crash_thrshld=(0.0175 if largeCap else 0.02)
 reverseratio=0.5
 df['target']=df.apply(lambda r: 1 if (r['maxchg_abs']>crash_thrshld and r['eodchange']*r['maxchg']<reverseratio*r['maxchg']*r['maxchg']) else 0, axis=1)
 
@@ -77,20 +67,7 @@ print(targetsummary.value_counts())
 #        print(equity,targetsummary[equity][targetsummary[equity] == 1].index)
 
 
-######train model
-# load data
-#featurecols=['alltradeimb_auto','trfimb_auto','trfcntimb_auto','totimb_auto','all_bid','all_ask','spread','litvolume']
-
-
 featurecols = featurecolsbase+[feature+'_1' for feature in featurecolsbase] +[feature+'_2' for feature in featurecolsbase]
-
-###remove
-
-####filter first 4 min
-
-#print(pd.DataFrame({'largemv':df[df['maxchg_abs']>crash_thrshld].groupby('date')['maxchg_abs'].count(),\
-#                    'crash':df[df['target']==1].groupby('date')['target'].count()}).fillna(0))
-
 
 kfold=5
 seed=1
@@ -99,14 +76,14 @@ classifiers = [
     ('XGB_cus5', XGBClassifier(max_depth=5)),
     ('XGB_cus', XGBClassifier(max_depth=3)),
     ('XGB_cusR', XGBClassifier(max_depth=3,learning_rate=0.5)),
-    ('XGB_cusS', XGBClassifier(max_depth=3,subsample=0.5)),
-    ('XGB_cusD', XGBClassifier(max_depth=3,max_delta_step=3)),
+    ('XGB_cusS', XGBClassifier(max_depth=3,subsample=0.5)),#overall winner
+    #('XGB_cusD', XGBClassifier(max_depth=3,max_delta_step=3)),
     ('DT5', DecisionTreeClassifier(max_depth=5)),
     ('RF', RandomForestClassifier()),
 ]
-classifiers = [
-    ('XGB_cusS', XGBClassifier(max_depth=3,subsample=0.5)),
-]
+#classifiers = [
+#    ('XGB_cusS', XGBClassifier(max_depth=3,subsample=0.5)),
+#]
 
 
 def modelselectwraper(classifiers,kfoldds,dsratio,target_prob):
@@ -128,16 +105,16 @@ def modelselectwraper(classifiers,kfoldds,dsratio,target_prob):
     for name in modelnames+['mega']:
         t=oosDFbyday.groupby([name,'target'])['target'].count()
         alarm=t[1].sum()
-        score_0=float(t[1,1])/alarm
-        score_1=float(t[1,1])/((t[0,1] if (0,1) in t.index else 0)+t[1,1])
+        score_0=float(t[1,1] if (1,1) in t.index else 0)/alarm
+        score_1=float(t[1,1] if (1,1) in t.index else 0)/((t[0,1] if (0,1) in t.index else 0)+float(t[1,1] if (1,1) in t.index else 0))
         d[name]=[score_0,score_1,float(alarm)/n]
     d = pd.DataFrame.from_dict(d,orient='index')
     d.columns=['score_0','score_1','alarm']
     print(d)
     return
 
-kfoldds=0.1 #large cap
-kfoldds=0.05 #small cap
+
+kfoldds=0.05 #for strategy
 dsratio=0.2
 
 dsratio_day=0.1
@@ -160,8 +137,8 @@ for targetp in [None,98,99]:
     print(summaryDF_day)
 
 
-#for targetp in [None,98,98.5,99]:
-for targetp in []:
+for targetp in [None,98,98.5,99]:
+#for targetp in []:
     print(targetp)
     #modelselectwraper(classifiers,kfoldds,dsratio,targetp)
     modelselectwraper(classifiers, kfoldds, (dsratio_morning,dsratio_day), targetp)

@@ -17,9 +17,9 @@ df=pd.DataFrame()
 
 equitydict=dict(static.equities_train)
 
-#equitylist=[x[0] for x in static.equities_train if ((x[0] in static.equities_done) and (equitydict[x[0]]>static.median_cap_threshold))]
+equitylist=[x[0] for x in static.equities_train if ((x[0] in static.equities_done) and (equitydict[x[0]]>static.median_cap_threshold))]
 
-equitylist=[x[0] for x in static.equities_train if ((x[0] in static.equities_done) and (equitydict[x[0]]<static.median_cap_threshold))]
+#equitylist=[x[0] for x in static.equities_train if ((x[0] in static.equities_done) and (equitydict[x[0]]<static.median_cap_threshold))]
 print(len(static.equities_done),len(equitylist))
 
 for equity in [x for x in equitylist]:
@@ -30,8 +30,8 @@ for equity in [x for x in equitylist]:
 
 
 ######crash method 1
-#crash_thrshld=0.0175
-crash_thrshld=0.02
+crash_thrshld=0.0175
+#crash_thrshld=0.02
 reverseratio=0.5
 df['target']=df.apply(lambda r: 1 if (r['maxchg_abs']>crash_thrshld and r['eodchange']*r['maxchg']<reverseratio*r['maxchg']*r['maxchg']) else 0, axis=1)
 df = df[df['firsttime']>pd.to_timedelta('3m')]
@@ -82,9 +82,10 @@ paramset=[]
 for revertwindow in [3,5]:
     for reverthreshold in [0,0.002]:
         for crashwindow in [30]:
-            for crashthreshold in [0.015]:
+            #for crashthreshold in [0.015]:
+            for crashthreshold in [0.0175]:
                 for usepredict in [True,False]:
-                    for stoploss in [0.015]:#was 0.002
+                    for stoploss in [0.0175]:#was 0.002
                         for stopgain in [0.05]:
                             for timewindow in [10,30,60]:#minute
                                 paramset.append({'revertwindow':revertwindow,
@@ -115,17 +116,18 @@ for i in range(len(paramset)):
 #for i in [5]:
     trade = pd.DataFrame(alltrades[i], columns=['pnl','length','time', 'stock','date'])
     trade['date']=pd.to_datetime(trade['date'])
-    #print(i,paramset[i])
+    print(i,paramset[i])
     #trade=trade[trade['length']<0]
     #test only do one trade a day
     trade = trade.groupby(['date','stock'])[['pnl','length','time']].first().reset_index()
     #test only do
-    #trade = trade.groupby(['date','stock']).apply(lambda x: truncateFirstPNL(x)).reset_index()
-    #trade.to_csv('Data/strategy/largecap_'+str(i)+'.csv')
+    #trade = trade.groupby(['date','stock']).apply(lambda x: truncateFirstPNL(x)).reset_index() #good idea for small cap
+    #trade.to_csv('Data/strategy/smallcap_'+str(i)+'.csv')
     dailypnl = pd.DataFrame({'count':trade.groupby('date')['stock'].count()})
     dailypnl['pnl']=trade.groupby('date')['pnl'].sum()
     reportDict[(paramset[i]['reverthreshold'],paramset[i]['revertwindow'],paramset[i]['usepredict'],paramset[i]['timewindow'])]=\
         (len(dailypnl),len(trade),dailypnl['pnl'].mean()/dailypnl['pnl'].std()*np.sqrt(250*len(dailypnl)/80))
+    print(len(dailypnl),len(trade),dailypnl['pnl'].mean()/dailypnl['pnl'].std()*np.sqrt(250*len(dailypnl)/80))
 
 for key in reportDict.keys():
     if key[2]==True:print(key,reportDict[key])
@@ -133,8 +135,8 @@ for key in reportDict.keys():
     if key[2]==False:print(key,reportDict[key])
 
 
-for i in [0]:
-    if not paramset[i]['usepredict']:continue
+for i in [19]:
+    #if not paramset[i]['usepredict']:continue
     trade = pd.DataFrame(alltrades[i], columns=['pnl','length','time', 'stock','date'])
     #trade=trade[trade['length']<0]
 

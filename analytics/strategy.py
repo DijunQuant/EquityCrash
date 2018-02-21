@@ -43,7 +43,6 @@ def getPosition(df,revertwindow,crashwindow,crashthreshold,revertthreshold,usepr
             exit=df.iloc[-1:]
         result.append([(df['pos'] * df['keep'] * df['diff']).sum(),(df['pos'] * df['keep']).sum(), entry])
         tradeopportunity=tradeopportunity[tradeopportunity.index>exit.index[0]+pd.to_timedelta('1m')]
-
     return result
 
 def backtest(equitylist,paramset,featurecolsbase,featurecols,morningmodel,daymodel,startdate,enddate=pd.datetime(2017,11,29)):
@@ -77,3 +76,52 @@ def backtest(equitylist,paramset,featurecolsbase,featurecols,morningmodel,daymod
                     print(stock,date)
                     print([(np.round(x[0],4),x[1],str(x[2].time())) for x in thistrade])
     return alltrades
+
+def calcFeatures(equitylist,param,featurecolsbase,featurecols,morningmodel,daymodel,startdate=pd.datetime(2017,2,3),enddate=pd.datetime(2017,11,29)):
+    allFeatures=pd.DataFrame()
+    # for stock in ['AAP']:
+    for stock in equitylist:
+        testDF = dataprocess.loadFeatureDataBulk(stock, featurecolsbase, temperAtOpen=[], truncPostMove=False,
+                                                 startdate=startdate,enddate=enddate)
+        if len(testDF)<1:
+            print(stock,'load data fail')
+            continue
+        testDF['predict_m'] =np.array(morningmodel.predict_proba(testDF[featurecols].values)[:,1])
+        testDF['predict_d'] = np.array(daymodel.predict_proba(testDF[featurecols].values)[:, 1])
+        testDF['predict'] = testDF.apply(
+            lambda r: r['predict_m'] if r['firsttime'] < pd.to_timedelta('40m') else r['predict_d'], axis=1)
+        datelist = testDF.date.unique()
+
+        for date in datelist:
+            features = extractFeatures(testDF[testDF['date'] == date][['mid','predict','date','firsttime']+featurecols].copy(), param['crashwindow'],param['mincrash'],
+                                       param['revertwindows'], param['timewindows'])
+            features['stock']=stock
+
+            allFeatures=pd.concat([allFeatures,features])
+    return allFeatures
+
+
+def extractFeatures(df,crashwindow,mincrash,revertwindows,timewindows,cutoffEOD=10):
+    initial=df['mid'].values[0]
+    df['diff']=df['mid'].diff()/initial
+    df['max']=df['mid'].rolling(window=crashwindow).max()
+    df['min']=df['mid'].rolling(window=crashwindow).min()
+    df['range']=(df['max']-df['min'])/initial
+
+    df['max_index']=df['mid'].rolling(crashwindow).apply(np.argmax)
+    df['min_index'] = df['mid'].rolling(crashwindow).apply(np.argmin)
+    df['crashsign']=np.sign(df['max_index']-df['min_index']) #positive for crash up,  negative for crash down
+    df['revert']=df['crashsign']*(df['mid']-(df['crashsign']+1)/2*df['max']+(df['crashsign']-1)/2*df['min'])
+    for revertwindow in revertwindows:
+        df['signed_chg_'+str(revertwindow)]=df['mid'].diff(revertwindow)/initial*df['crashsign']
+    df['max_predict']=df['predict'].rolling(window=crashwindow).max()
+    df['avg_predict'] = df['predict'].rolling(window=crashwindow).mean()
+    for revertwindow in timewindows:
+        df['fut_signed_chg_'+str(revertwindow)]=(df['mid'].diff(revertwindow).shift(-revertwindow))/initial*df['crashsign']
+    #flag has the sign of trade
+
+    cutofftime=df['firsttime'][-1]-pd.to_timedelta(str(cutoffEOD)+'m')
+
+
+    return df[(df['firsttime']<cutofftime) & (df['range']>mincrash) & (df['signed_chg_1']<=0)].\
+        drop(['max_index','min_index'],axis=1).dropna()

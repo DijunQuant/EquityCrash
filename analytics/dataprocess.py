@@ -63,12 +63,12 @@ def computeFeatureForEquities(to_run,startdate,enddate,local,parallel=True,outpu
 
 def computeFeatureForEquitiesWraper(num,startdate,enddate,local,parallel=True,output_local=None,output_verbose=False,overwrite=False):
     if type(num)==int:
-        to_run=[name[0] for name in static.equities_train if (name[0] not in static.equities_done)]
+        to_run=[name[0] for name in static.equities_test if (name[0] not in static.equities_done)]
         if len(to_run)>num:
             to_run=to_run[:num]
         print('number',to_run)
     elif type(num)==str:
-        to_run = [name[0] for name in static.equities_train if (name[0].startswith(num))]
+        to_run = [name[0] for name in static.equities_test if (name[0].startswith(num))]
         print('first letter',num,to_run)
 
 
@@ -81,7 +81,7 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
     #hdf = pd.HDFStore(folder+'features//'+equity+'.h5')
     #output=pd.DataFrame()
     #df = pd.DataFrame(columns=['date', 'range', 'change']).set_index('date')
-    histbookdata =pd.DataFrame(columns=['date','spread','litvolume']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
+    histbookdata =pd.DataFrame(columns=['date','spread','litvolume','volumebydepth','volumebymindepth']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
                                        [site + 'all_ask' for site in['','NYSE', 'NASDAQ', 'BATS']])
     datelist=[]
     if output_local==None: output_local=local
@@ -89,15 +89,17 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
     alldata=pd.DataFrame()
 
     if output_local:
-        outputpath = localroot
         if computeNewFeature:
-            if not os.path.exists(outputpath + 'newfeatures//' + equity + '//'):
-                os.mkdir(outputpath + 'newfeatures//' + equity + '//')
+            outputpath = localroot+'new'
         else:
-            if not os.path.exists(outputpath + 'features//' + equity + '//'):
-                os.mkdir(outputpath + 'features//' + equity + '//')
+            outputpath = localroot
+        if not os.path.exists(outputpath + 'features//' + equity + '//'):
+            os.mkdir(outputpath + 'features//' + equity + '//')
     else:
-        outputpath = s3root
+        if computeNewFeature:
+            outputpath = s3root+'new'
+        else:
+            outputpath = s3root
         #if not fs.exists(outputpath + 'features//' + equity + '//'):
         #    fs.mkdir(outputpath + 'features//' + equity + '//')
     if fs.exists(outputpath + 'features/' + equity + '_all.csv.gz'):
@@ -105,7 +107,6 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
             fs.rm(outputpath + 'features/' + equity + '_all.csv.gz')
         else:
             return
-
     if local:
         prefixpath=localroot+equity
         for file in os.listdir(prefixpath):
@@ -140,16 +141,20 @@ def computeFeatureForEquity(equity, param, startdate,enddate,local=True,output_l
                 for major in ['NYSE', 'NASDAQ', 'BATS']:
                     df[major + 'all' + side] = df[[x + side for x in venue if major in x]].sum(axis=1)
                 df = df.drop([x + side for x in venue], axis=1)
-            if computeNewFeature:
-                outputfile = outputpath + 'newfeatures/' + equity + '/' + thisdate.strftime('%Y%m%d') + '.csv'
-            else:
-                outputfile=outputpath + 'features/' + equity + '/' + thisdate.strftime('%Y%m%d') + '.csv'
+            df['volumebydepth']=df['litvolume']/(df[[x + 'all_bid' for x in ['NYSE', 'NASDAQ', 'BATS']]].sum(axis=1)+
+                                                 df[[x + 'all_ask' for x in ['NYSE', 'NASDAQ', 'BATS']]].sum(axis=1)+0.1)
+            df['volumebymindepth'] = df['litvolume'] / (0.1+np.minimum(
+            df[[x + 'all_bid' for x in ['NYSE', 'NASDAQ', 'BATS']]].sum(axis=1),
+            df[[x + 'all_ask' for x in ['NYSE', 'NASDAQ', 'BATS']]].sum(axis=1)))
+
+            outputfile=outputpath + 'features/' + equity + '/' + thisdate.strftime('%Y%m%d') + '.csv'
 
             if output_local:
                 if not os.path.exists(outputfile):
                     if computeNewFeature:
                         #computeFeaturesNew(df, thisdate, param, histbookdata,['litvolume']).to_csv(outputfile)
-                        computeFeaturesNew(df, thisdate, param, histbookdata, ['spread']).to_csv(outputfile)
+                        #computeFeaturesNew(df, thisdate, param, histbookdata, ['spread']).to_csv(outputfile)
+                        computeFeaturesNew(df, thisdate, param, histbookdata, ['volumebydepth','volumebymindepth']).to_csv(outputfile)
                     else:
                         computeFeatures(df, thisdate, param, histbookdata).to_csv(outputfile)
             else:
@@ -190,7 +195,7 @@ def updatehistbookdata(df,param,histbookdata):
         #print(thisdate, 'drop ' + str(mindate),len(histbookdata))
     #update histbookdata
 
-    return pd.concat([histbookdata,df[['date','spread','litvolume']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
+    return pd.concat([histbookdata,df[['date','spread','litvolume','volumebydepth','volumebymindepth']+[site + 'all_bid' for site in['','NYSE', 'NASDAQ', 'BATS']]+\
                                              [site + 'all_ask' for site in['','NYSE', 'NASDAQ', 'BATS']]]])
 
 def computeFeatures(df,thisdate,param,histbookdata):
